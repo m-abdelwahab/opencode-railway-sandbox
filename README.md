@@ -152,16 +152,16 @@ anonymous tier.
 
 ## Desktop panel
 
-OpenCode Desktop gets a **Railway computers** side panel. Open it from the side panel's **+** menu or the command
-palette (**Show Railway computers**). It lists your tasks across projects, showing:
+OpenCode Desktop gets a **Railway Sandboxes** side panel. Open it from the side panel's **+** menu or the command
+palette (**Show Railway Sandboxes**). It lists your tasks across projects, showing:
 
-- status and the time left before the computer shuts itself down
+- status and the time left before the sandbox shuts itself down
 - preview URLs, with open and copy buttons
 - patch state (ready or applied) and the injected variable names
 - a **Stop and destroy** button for running sandboxes
 
-The filter defaults to **Active**; switch to **All** to see finished, failed, and stopped tasks from the last 24 hours.
-The panel updates live from the plugin's RPC events.
+Tabs switch between **Active** (the default) and **All**, which adds finished, failed, and stopped tasks from the last
+24 hours, with a count on each. The choice is remembered, and the panel updates live from the plugin's RPC events.
 
 The panel is a GUI part (`./gui-experimental`), which OpenCode Desktop loads only for plugins in your **global**
 `opencode.json(c)`. The web UI lists the plugin but does not run third-party GUI parts.

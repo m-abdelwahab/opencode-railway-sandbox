@@ -87,7 +87,7 @@ KEEP=1 RAILWAY_API_TOKEN=... RAILWAY_ENVIRONMENT_ID=... \
 | 16 | OpenAI OAuth login forwarded as an access token; the remote run succeeds on `openai/gpt-6.1-terra-fast` | ✅ |
 | 17 | Public sandbox URL unreachable: requests fall back to `curl` in the VM over the exec channel (GET, POST with body, HTTP errors preserved) | ✅ (forced with an invalid URL) |
 | 18 | Desktop panel: rows, countdown, preview links, Stop and destroy | ✅ verified by hand in OpenCode Desktop 2.3.0 |
-| 19 | Panel Active/All filter | ⏳ built; awaiting a visual check |
+| 19 | Panel Active/All filter | ✅ verified by hand; switched to tabs with counts and renamed the panel "Railway Sandboxes" on feedback |
 | 20 | Free default model when no forwardable login: quota exhaustion is reported with a hint | ✅ (quota was exhausted during testing) |
 
 ### Bugs found and fixed in this round

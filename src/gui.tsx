@@ -11,13 +11,13 @@ const definition = Plugin.define({
   },
   i18n: {
     en: {
-      title: "Railway computers",
-      "command.toggle": "Show Railway computers",
-      empty: "No Railway computers yet. Ask the agent to run something on a Railway computer, for example a build with a preview.",
-      "empty.active": "Nothing is running on Railway computers right now.",
-      "filter.label": "Show",
-      "filter.active": "Active ({{count}})",
-      "filter.all": "All ({{count}})",
+      title: "Railway Sandboxes",
+      "command.toggle": "Show Railway Sandboxes",
+      empty: "No Railway sandboxes yet. Ask the agent to run something on a Railway computer, for example a build with a preview.",
+      "empty.active": "No sandboxes are running right now.",
+      "filter.label": "Filter sandboxes",
+      "filter.active": "Active",
+      "filter.all": "All",
       refresh: "Refresh",
       open: "Open preview",
       copy: "Copy preview URL",
@@ -38,7 +38,13 @@ const css = `
 .rc-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; font-size: 13px; line-height: 1.4; }
 .rc-head { display: flex; align-items: center; justify-content: space-between; }
 .rc-head h2 { font-size: 13px; font-weight: 600; margin: 0; flex: 1; }
-.rc-actions { display: flex; align-items: center; gap: 4px; }
+.rc-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(127,127,127,0.12); }
+.rc-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 10px; border: 0;
+  border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 12px; opacity: 0.7; cursor: pointer; }
+.rc-tab:hover { opacity: 1; }
+.rc-tab[aria-selected="true"] { opacity: 1; background: rgba(127,127,127,0.22); font-weight: 600; }
+.rc-tab:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.rc-count { font-size: 11px; opacity: 0.7; font-variant-numeric: tabular-nums; }
 .rc-empty, .rc-muted { opacity: 0.65; }
 .rc-row { border: 1px solid rgba(127,127,127,0.25); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
 .rc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -55,6 +61,7 @@ const css = `
 `
 
 const LIVE = new Set(["awaiting-sign-in", "running", "previewing"])
+const FILTERS = ["active", "all"] as const
 
 const remaining = (ms: number) => {
   const seconds = Math.max(0, Math.round(ms / 1000))
@@ -119,20 +126,37 @@ function ComputersView() {
     <div class="rc-panel">
       <div class="rc-head">
         <h2>{ctx.t("title")}</h2>
-        <div class="rc-actions">
-          <ui.Select
-            label={ctx.t("filter.label")}
-            options={[
-              { value: "active", label: ctx.t("filter.active", { count: active().length }) },
-              { value: "all", label: ctx.t("filter.all", { count: computers().length }) },
-            ]}
-            value={filter()}
-            onChange={(value) => ctx.stores.view.set({ filter: value })}
-          />
-          <ui.Tooltip value={ctx.t("refresh")}>
-            <ui.IconButton icon="refresh" label={ctx.t("refresh")} onClick={() => void load()} />
-          </ui.Tooltip>
-        </div>
+        <ui.Tooltip value={ctx.t("refresh")}>
+          <ui.IconButton icon="refresh" label={ctx.t("refresh")} onClick={() => void load()} />
+        </ui.Tooltip>
+      </div>
+      <div
+        class="rc-tabs"
+        role="tablist"
+        aria-label={ctx.t("filter.label")}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+          const next = filter() === "active" ? "all" : "active"
+          ctx.stores.view.set({ filter: next })
+          ;(event.currentTarget.querySelector(`[data-filter="${next}"]`) as HTMLElement | null)?.focus()
+        }}
+      >
+        <For each={FILTERS}>
+          {(value) => (
+            <button
+              type="button"
+              class="rc-tab"
+              role="tab"
+              data-filter={value}
+              aria-selected={filter() === value}
+              tabIndex={filter() === value ? 0 : -1}
+              onClick={() => ctx.stores.view.set({ filter: value })}
+            >
+              {ctx.t(`filter.${value}`)}
+              <span class="rc-count">{value === "active" ? active().length : computers().length}</span>
+            </button>
+          )}
+        </For>
       </div>
       <Show when={error()}>
         <div class="rc-muted">{ctx.t("unreachable")}</div>
