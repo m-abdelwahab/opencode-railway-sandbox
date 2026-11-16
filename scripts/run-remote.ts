@@ -22,6 +22,7 @@ const result = await runSandbox(
     title: "standalone test",
     agent: "build",
     credentials: [],
+    variables: {},
     preview,
     previewMinutes: 10,
     signal: AbortSignal.timeout(20 * 60_000),

@@ -19,6 +19,11 @@ export interface RunInput {
   readonly agent: string
   readonly model?: ModelRef
   readonly credentials: ReadonlyArray<ForwardedCredential>
+  /**
+   * Environment variables for the computer. Values may be Railway references such as `${{Postgres.DATABASE_URL}}`,
+   * which Railway resolves when the sandbox is created, so secrets never pass through this machine.
+   */
+  readonly variables: Readonly<Record<string, string>>
   /** Build the app and leave it serving on $PORT, then return a preview URL. */
   readonly preview: boolean
   /** How long a preview stays up before the computer shuts itself down. */
@@ -64,9 +69,15 @@ export class AnonymousUnavailable extends Error {
 export const PREVIEW_PORT = 8080
 export const PREVIEW_COMMAND_FILE = "/root/.preview-command"
 
-export const remoteInstructions = (input: Pick<RunInput, "prompt" | "preview">, previewURL?: string) =>
+export const remoteInstructions = (input: Pick<RunInput, "prompt" | "preview" | "variables">, previewURL?: string) =>
   [
     "You are a subagent running headless on a disposable Railway computer (a Linux VM), working on a copy of the user's project.",
+    ...(Object.keys(input.variables).length
+      ? [
+          `These environment variables are set for every command: ${Object.keys(input.variables).join(", ")}.`,
+          "This computer is on the Railway project's private network, so hosts like *.railway.internal resolve. Do not print secret values.",
+        ]
+      : []),
     "Nobody can answer questions: make reasonable assumptions and finish the task autonomously.",
     "Your file changes are returned to the parent agent as a patch. End with a concise report of what you did and found.",
     ...(input.preview

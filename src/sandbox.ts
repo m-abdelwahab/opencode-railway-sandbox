@@ -25,27 +25,58 @@ export interface SandboxOptions {
 
 const sh = (script: string) => `bash -lc ${quote(script)}`
 
-class Remote {
+class HttpError extends Error {}
+
+/**
+ * Talks to the sandbox's OpenCode server. Requests go through the sandbox's public domain; when that path fails at the
+ * network level (a timeout or a refused connection, not an HTTP error), the same request is made with `curl` inside the
+ * VM over Railway's exec channel, which does not depend on the public route.
+ */
+export class Remote {
   constructor(
     readonly base: string,
-    private readonly authorization: string,
+    private readonly password: string,
     private readonly signal: AbortSignal,
+    private readonly sandbox?: Sandbox,
   ) {}
 
-  async request<T>(method: string, route: string, body?: unknown): Promise<T> {
-    const response = await fetch(`${this.base}${route}`, {
-      method,
-      signal: this.signal,
-      headers: {
-        authorization: this.authorization,
-        ...(body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
-    const text = await response.text()
-    if (!response.ok) throw new Error(`${method} ${route} -> ${response.status}: ${text.slice(0, 500)}`)
+  private parse<T>(method: string, route: string, status: number, text: string): T {
+    if (status < 200 || status >= 300) throw new HttpError(`${method} ${route} -> ${status}: ${text.slice(0, 500)}`)
     const json = (text ? JSON.parse(text) : undefined) as { data: T } | T
     return json !== null && typeof json === "object" && "data" in json ? json.data : (json as T)
+  }
+
+  private async viaExec<T>(method: string, route: string, body?: unknown): Promise<T> {
+    const payload = body === undefined ? "" : Buffer.from(JSON.stringify(body)).toString("base64")
+    const result = await this.sandbox!.exec(
+      sh(
+        `curl -sS -m 30 -X ${method} -u "opencode:$OPENCODE_PASSWORD" ` +
+          (payload ? `-H 'content-type: application/json' --data-binary "$(printf %s ${payload} | base64 -d)" ` : "") +
+          `-w '\\n%{http_code}' ${quote(`http://127.0.0.1:${SERVER_PORT}${route}`)}`,
+      ),
+      { ephemeral: true, timeoutSec: 45, signal: this.signal },
+    )
+    if (result.exitCode !== 0) throw new Error(`curl in the sandbox failed (${result.exitCode}): ${result.stderr.trim()}`)
+    const split = result.stdout.lastIndexOf("\n")
+    return this.parse(method, route, Number(result.stdout.slice(split + 1)), result.stdout.slice(0, split))
+  }
+
+  async request<T>(method: string, route: string, body?: unknown): Promise<T> {
+    try {
+      const response = await fetch(`${this.base}${route}`, {
+        method,
+        signal: AbortSignal.any([this.signal, AbortSignal.timeout(30_000)]),
+        headers: {
+          authorization: "Basic " + btoa(`opencode:${this.password}`),
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+      return this.parse(method, route, response.status, await response.text())
+    } catch (error) {
+      if (error instanceof HttpError || this.signal.aborted || !this.sandbox) throw error
+      return this.viaExec(method, route, body)
+    }
   }
 }
 
@@ -66,7 +97,31 @@ interface RemoteMessage {
 const chronological = (messages: ReadonlyArray<RemoteMessage>) =>
   messages.toSorted((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0))
 
-export async function runSandbox(options: SandboxOptions, input: RunInput): Promise<RunResult> {
+/**
+ * Abort reason meaning "stop watching, keep the computer": used when the plugin reloads, so a new instance can resume
+ * following the task instead of the work being thrown away.
+ */
+export class Detached extends Error {}
+
+/** Everything needed to follow a started task again from another plugin instance. Contains the server password. */
+export interface Handle {
+  readonly sandboxID: string
+  readonly url: string
+  readonly password: string
+  readonly sessionID: string
+  readonly previewDomain?: string
+}
+
+type FollowInput = Pick<RunInput, "preview" | "previewMinutes" | "signal" | "progress">
+
+const connectOptions = (auth: RailwayAuth) => ({
+  token: auth.token,
+  authType: auth.authType,
+  ...(auth.environmentId ? { environmentId: auth.environmentId } : {}),
+})
+
+/** Provisions the sandbox, uploads the project, starts the remote agent, and returns a resumable handle. */
+export async function startSandbox(options: SandboxOptions, input: RunInput): Promise<{ sandbox: Sandbox; handle: Handle }> {
   const password = crypto.randomUUID()
   input.progress("provisioning Railway sandbox")
   const sandbox = await Sandbox.create({
@@ -76,9 +131,10 @@ export async function runSandbox(options: SandboxOptions, input: RunInput): Prom
     idleTimeoutMinutes: options.idleTimeoutMinutes,
     networkIsolation: "PRIVATE",
     domains: [{ port: SERVER_PORT }, ...(input.preview ? [{ port: PREVIEW_PORT }] : [])],
-    env: { OPENCODE_PASSWORD: password, PORT: String(PREVIEW_PORT) },
+    // User variables first so they can never replace the server's password or the preview port.
+    env: { ...input.variables, OPENCODE_PASSWORD: password, PORT: String(PREVIEW_PORT) },
   })
-  const dispose = () => sandbox.destroy().catch(() => {})
+  const dispose = () => sandbox.destroy().then(() => {}, () => {})
   try {
     const domainFor = (port: number) => sandbox.domains?.find((entry) => entry.port === port)?.domain
     const serverDomain = domainFor(SERVER_PORT)
@@ -121,7 +177,7 @@ export async function runSandbox(options: SandboxOptions, input: RunInput): Prom
     await server.sessionName
     await server.detach()
 
-    const remote = new Remote(url, "Basic " + btoa(`opencode:${password}`), input.signal)
+    const remote = new Remote(url, password, input.signal, sandbox)
     const ready = Date.now() + 120_000
     while (!(await remote.request("GET", "/api/info").then(() => true, () => false))) {
       if (Date.now() > ready) throw new Error("Remote OpenCode server did not become ready within 120s")
@@ -153,18 +209,52 @@ export async function runSandbox(options: SandboxOptions, input: RunInput): Prom
     await remote.request("POST", `/api/session/${session.id}/prompt`, {
       text: remoteInstructions(input, previewDomain ? `https://${previewDomain}` : undefined),
     })
-
     input.progress("running", { sessionID: session.id })
-    let final = session
+    return { sandbox, handle: { sandboxID: sandbox.id, url, password, sessionID: session.id, previewDomain } }
+  } catch (error) {
+    // Nothing can resume a task that never started, so the computer goes even when detaching.
+    await dispose()
+    throw error
+  }
+}
+
+/** Waits for a started task, collects its patch, and starts its preview. Resumable from a stored handle. */
+export async function followSandbox(
+  options: Pick<SandboxOptions, "auth">,
+  handle: Handle,
+  input: FollowInput,
+  connected?: Sandbox,
+): Promise<RunResult> {
+  const sandbox = connected ?? (await Sandbox.connect(handle.sandboxID, connectOptions(options.auth)))
+  const dispose = () => sandbox.destroy().then(() => {}, () => {})
+  try {
+    const remote = new Remote(handle.url, handle.password, input.signal, sandbox)
+    const session = { id: handle.sessionID }
+    const previewDomain = handle.previewDomain
+    let final: RemoteSession = { id: handle.sessionID, time: {} }
     let lastStatus = ""
+    let lostSince: number | undefined
     while (true) {
       await sleep(2500)
       if (input.signal.aborted) throw input.signal.reason
-      const [active, current, messages] = await Promise.all([
-        remote.request<Record<string, unknown>>("GET", "/api/session/active"),
-        remote.request<RemoteSession>("GET", `/api/session/${session.id}`),
-        remote.request<RemoteMessage[]>("GET", `/api/session/${session.id}/message`),
-      ])
+      let polled: [Record<string, unknown>, RemoteSession, RemoteMessage[]]
+      try {
+        polled = await Promise.all([
+          remote.request<Record<string, unknown>>("GET", "/api/session/active"),
+          remote.request<RemoteSession>("GET", `/api/session/${session.id}`),
+          remote.request<RemoteMessage[]>("GET", `/api/session/${session.id}/message`),
+        ])
+        lostSince = undefined
+      } catch (error) {
+        if (input.signal.aborted) throw input.signal.reason
+        lostSince ??= Date.now()
+        if (Date.now() - lostSince > 180_000)
+          throw new Error(`Lost contact with the remote OpenCode server for 3 minutes: ${error instanceof Error ? error.message : String(error)}`)
+        input.progress("reconnecting to the remote OpenCode server")
+        lastStatus = ""
+        continue
+      }
+      const [active, current, messages] = polled
       final = current
       const lastTool = chronological(messages)
         .flatMap((message) => message.content ?? [])
@@ -238,17 +328,19 @@ export async function runSandbox(options: SandboxOptions, input: RunInput): Prom
       running: true,
     }
   } catch (error) {
-    await dispose()
+    if (!(input.signal.reason instanceof Detached)) await dispose()
     throw error
   }
 }
 
+export async function runSandbox(options: SandboxOptions, input: RunInput, onStarted?: (handle: Handle) => Promise<void>) {
+  const { sandbox, handle } = await startSandbox(options, input)
+  await onStarted?.(handle)
+  return followSandbox(options, handle, input, sandbox)
+}
+
 /** Destroys a sandbox started by an earlier run, for example to take a preview down early. */
 export async function destroySandbox(auth: RailwayAuth, id: string) {
-  const sandbox = await Sandbox.connect(id, {
-    token: auth.token,
-    authType: auth.authType,
-    ...(auth.environmentId ? { environmentId: auth.environmentId } : {}),
-  })
+  const sandbox = await Sandbox.connect(id, connectOptions(auth))
   await sandbox.destroy()
 }

@@ -3,6 +3,8 @@ export interface RailwayAuth {
   readonly authType: "bearer" | "project-token"
   /** Required for bearer tokens; project tokens carry their environment. */
   readonly environmentId?: string
+  /** Known for project tokens and discovered placements; needed to list services for variable references. */
+  readonly projectId?: string
   readonly describe: string
 }
 
@@ -27,11 +29,19 @@ const GRAPHQL = "https://backboard.railway.com/graphql/v2"
 
 const PROJECT_FIELDS = "id name deletedAt environments { edges { node { id name } } }"
 
-async function graphql<T>(token: string, query: string): Promise<{ data?: T; errors?: Array<{ message: string }> }> {
+async function graphql<T>(
+  token: string,
+  query: string,
+  variables: Record<string, unknown> = {},
+  authType: RailwayAuth["authType"] = "bearer",
+): Promise<{ data?: T; errors?: Array<{ message: string }> }> {
   const response = await fetch(GRAPHQL, {
     method: "POST",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ query }),
+    headers: {
+      ...(authType === "project-token" ? { "project-access-token": token } : { authorization: `Bearer ${token}` }),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
   })
   return (await response.json()) as { data?: T; errors?: Array<{ message: string }> }
 }
@@ -61,7 +71,10 @@ async function projects(token: string): Promise<ProjectNode[]> {
 }
 
 /** Picks the environment for a bearer (OAuth or account) token from plugin options or what the token can access. */
-export async function resolveEnvironment(token: string, placement: Placement): Promise<{ environmentId: string; describe: string }> {
+export async function resolveEnvironment(
+  token: string,
+  placement: Placement,
+): Promise<{ environmentId: string; projectId?: string; describe: string }> {
   if (placement.environmentId) return { environmentId: placement.environmentId, describe: `environment ${placement.environmentId}` }
   const available = await projects(token)
   const candidates = placement.project
@@ -84,5 +97,55 @@ export async function resolveEnvironment(token: string, placement: Placement): P
     .map((edge) => edge.node)
     .find((env) => env.id === wanted || env.name === wanted)
   if (!environment) throw new SetupError(`Railway project "${project.name}" has no environment "${wanted}".`)
-  return { environmentId: environment.id, describe: `${project.name}/${environment.name}` }
+  return { environmentId: environment.id, projectId: project.id, describe: `${project.name}/${environment.name}` }
+}
+
+/** Fills in the project (and environment) a project token is scoped to. */
+export async function projectTokenScope(token: string): Promise<{ projectId: string; environmentId: string } | undefined> {
+  const result = await graphql<{ projectToken: { projectId: string; environmentId: string } }>(
+    token,
+    "query { projectToken { projectId environmentId } }",
+    {},
+    "project-token",
+  )
+  return result.data?.projectToken
+}
+
+export interface ServiceVariables {
+  readonly service: string
+  /** Variable names only; values are never read back to the agent. */
+  readonly names: readonly string[]
+}
+
+/**
+ * Lists the environment's services and shared variables with their variable names, so an agent can write Railway
+ * references such as `${{Postgres.DATABASE_URL}}` without ever seeing a secret value.
+ */
+export async function listVariables(auth: RailwayAuth): Promise<{ services: ServiceVariables[]; shared: readonly string[] }> {
+  if (!auth.projectId || !auth.environmentId)
+    throw new SetupError("Listing services needs a Railway project and environment; set the plugin's \"project\" option.")
+  const services = await graphql<{ project: { services: { edges: Array<{ node: { id: string; name: string } }> } } }>(
+    auth.token,
+    "query($id: String!) { project(id: $id) { services { edges { node { id name } } } } }",
+    { id: auth.projectId },
+    auth.authType,
+  )
+  if (!services.data) throw new Error(`Railway API error: ${services.errors?.map((error) => error.message).join("; ")}`)
+  const names = async (serviceId?: string) => {
+    const result = await graphql<{ variables: Record<string, string> }>(
+      auth.token,
+      "query($projectId: String!, $environmentId: String!, $serviceId: String) { variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) }",
+      { projectId: auth.projectId, environmentId: auth.environmentId, serviceId },
+      auth.authType,
+    )
+    return Object.keys(result.data?.variables ?? {})
+      .filter((name) => !name.startsWith("RAILWAY_") || /PRIVATE_DOMAIN|PUBLIC_DOMAIN|TCP_PROXY/.test(name))
+      .sort()
+  }
+  return {
+    services: await Promise.all(
+      services.data.project.services.edges.map(async ({ node }) => ({ service: node.name, names: await names(node.id) })),
+    ),
+    shared: await names(),
+  }
 }

@@ -12,6 +12,34 @@ The plugin is a single OpenCode V2 **server plugin** (`Plugin.define` from `@ope
 | `ctx.tool.transform` | Adds `railway_computer` and `railway_computer_stop` |
 | `ctx.session.get` | Reads the parent session's model and directory |
 | `ctx.session.synthetic` | Delivers background results to the parent session, which wakes the parent agent (the same mechanism OpenCode's built-in subagents use) |
+| `ctx.permission.assert` | `railway_computer_apply` asks for `edit` on the patch's files, like OpenCode's own edit tools |
+| `ctx.storage` | Task registry (`computer/<task>`) and resumable handles (`handle/<task>`). Plugin storage is global per plugin ID, so every location's instance sees every task |
+| `ctx.rpc.register` | The `railway-computer` RPC (`list`, `stop`, and an `updated` event) that the Desktop panel calls |
+
+The Desktop panel is the package's `./gui-experimental` part (`src/gui.tsx`, built with `@opencode/plugin/gui/vite`).
+It registers a side `Panel`, a `session.panel` `MenuItem`, and a `Command`; calls the RPC through `ctx.client`; and
+keeps its Active/All filter in a `Store.global`.
+
+## Task lifecycle
+
+```text
+railway_computer ──► registry: running ──► start (sandbox, upload, serve, prompt) ──► handle stored
+                                                                                      │
+             plugin reload ── Detached ──► new instance: resume(handle) ◄────────────┤
+                                                                                      ▼
+                     follow (poll; exec-channel fallback) ──► patch + preimages ──► registry: finished / previewing
+                                                                                      │
+                                                    <railway_computer> synthetic ◄────┘
+```
+
+- **Reloads.** On unload the plugin aborts its watchers with a `Detached` reason: the sandbox is kept, and a task that
+  stored its handle is resumed by the next instance for the same directory (checked 2s after load and every 30s). A
+  process-wide set prevents two instances from following one task, and only the resuming instance reports.
+- **Transport.** Requests to the remote OpenCode go through the sandbox's public domain with a 30s timeout. On a
+  network-level failure they are retried as `curl` inside the VM over Railway's exec channel. Polling tolerates 3 minutes
+  without contact.
+- **Lifetimes.** `opencode serve` runs under `timeout <maxMinutes>m` and previews under `timeout <previewMinutes>m`.
+  Once nothing runs, Railway's idle timeout (default 10 minutes here) reclaims the sandbox.
 
 ## Remote execution
 

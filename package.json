@@ -5,10 +5,13 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./rpc": "./src/rpc.ts",
+    "./gui-experimental": "./dist/gui-experimental.cjs"
   },
   "files": [
     "src",
+    "dist",
     "README.md",
     "docs",
     "LICENSE"
@@ -18,12 +21,18 @@
     "railway": "^3.17.0"
   },
   "devDependencies": {
+    "@types/bun": "latest",
+    "solid-js": "^1.9",
     "typescript": "^5.9.0",
-    "@types/bun": "latest"
+    "vite": "^7",
+    "vite-plugin-solid": "^2.11"
   },
   "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
     "test": "bun test",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "prepublishOnly": "vite build"
   },
   "keywords": [
     "opencode",

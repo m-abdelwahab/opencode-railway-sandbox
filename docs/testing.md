@@ -74,3 +74,33 @@ KEEP=1 RAILWAY_API_TOKEN=... RAILWAY_ENVIRONMENT_ID=... \
   `pkill`.
 - A second OAuth attempt failed with `EADDRINUSE` while the first was pending; new attempts now supersede pending ones
   and plugin unload closes the listener.
+
+## Results of the second run (2026-11-17): apply, variables, Desktop panel, resilience
+
+| # | Scenario | Result |
+|---|---|---|
+| 11 | `railway_computer_variables` lists the project's services and variable names (no values) with an OAuth token | ✅ Postgres: DATABASE_URL, PGHOST, … |
+| 12 | Agent passes `{"DATABASE_URL": "${{Postgres.DATABASE_URL}}"}`; the remote agent reaches the private Postgres, creates a table, inserts rows, prints `count: 3` | ✅ |
+| 13 | `railway_computer_apply` check + apply; an unrelated uncommitted local edit is preserved | ✅ |
+| 14 | Unit: clean apply, check-only, three-way merge keeping nearby local edits (index untouched), real conflict markers, `.rej` outside git | ✅ 10 tests |
+| 15 | Forced plugin reload mid-task: new instance logs "Resumed after a plugin reload", finishes, and exactly one report is delivered | ✅ |
+| 16 | OpenAI OAuth login forwarded as an access token; the remote run succeeds on `openai/gpt-6.1-terra-fast` | ✅ |
+| 17 | Public sandbox URL unreachable: requests fall back to `curl` in the VM over the exec channel (GET, POST with body, HTTP errors preserved) | ✅ (forced with an invalid URL) |
+| 18 | Desktop panel: rows, countdown, preview links, Stop and destroy | ✅ verified by hand in OpenCode Desktop 2.3.0 |
+| 19 | Panel Active/All filter | ⏳ built; awaiting a visual check |
+| 20 | Free default model when no forwardable login: quota exhaustion is reported with a hint | ✅ (quota was exhausted during testing) |
+
+### Bugs found and fixed in this round
+
+- A plugin reload (OpenCode also watches a local plugin's **source**) aborted running tasks and destroyed their
+  sandboxes. Tasks now detach and resume.
+- After a resume, the old instance raced the new one and marked a live preview `stopped`. Detached tasks with a stored
+  handle now never report from the old instance.
+- A single timed-out poll through the public domain failed a whole task. Requests now fall back to the exec channel,
+  and polling tolerates 3 minutes without contact.
+- Late progress writes overwrote a task's final state. Registry writes are serialized per task, and progress lines are
+  ignored once a task settles.
+- `git apply --3way` refuses files with uncommitted changes ("does not match index"), which is the normal case here. The
+  merge now uses `git merge-file` per file against the saved preimage.
+- The sandbox ID was recorded only at the end, so a running task could not be stopped from the panel. It is now recorded
+  as soon as the sandbox exists.
