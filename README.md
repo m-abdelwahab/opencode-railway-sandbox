@@ -18,6 +18,41 @@ Agent: [edits src/main.js] → railway_sandbox(preview: true)
 > **Not affiliated with OpenCode.** This is a community plugin. It is not built by, endorsed by, or affiliated with the
 > OpenCode team.
 
+## Quick start
+
+Requires OpenCode 2.3 or newer. Paste this into OpenCode:
+
+```text
+Install the OpenCode plugin "opencode-railway-sandbox" globally and tell me how to connect Railway.
+```
+
+Then connect Railway with `/connect` → **Railway** → **Sign in with Railway**, and pick the project sandboxes should run
+in. Without an account, the plugin tries a free anonymous Railway VM first.
+
+### Try it
+
+In an empty folder:
+
+```text
+Create a tiny Vite app here called "launch-board" that shows a dark page with a heading "Launch Board" and a list of
+three launches with statuses (planned, in progress, shipped). Initialize a git repo and commit it.
+
+Then use the railway_sandbox tool with preview=true to install dependencies, build it, and serve it on a Railway
+sandbox, and give me the shareable preview URL. While it runs, explain what's happening on the Railway side.
+
+When the report arrives, show me the changes the remote agent made, apply its patch with railway_sandbox_apply, and
+tell me how long the preview stays up and how to stop it early.
+```
+
+Or in an existing project:
+
+```text
+Run my test suite on a Railway sandbox instead of this machine, fix anything that fails there, then show me the patch
+and apply it if it looks right.
+```
+
+More ideas in [docs/use-cases.md](docs/use-cases.md).
+
 ## How it works
 
 ```text
@@ -62,6 +97,8 @@ Selection order:
    link for the agent to relay, and starts the task automatically once you approve.
 
 ## Install
+
+The [Quick start](#quick-start) prompt does this for you. To install by hand:
 
 ```jsonc
 // opencode.jsonc (project) or ~/.config/opencode/opencode.jsonc (global)
