@@ -117,7 +117,7 @@ export async function applyPatch(directory: string, patchFile: string, options: 
 
   // File by file: apply what applies, three-way merge what has a base, and reject the rest.
   const repo = await isRepo(directory)
-  const scratch = await mkdtemp(path.join(os.tmpdir(), "rc-merge-"))
+  const scratch = await mkdtemp(path.join(os.tmpdir(), "rs-merge-"))
   const conflicts: string[] = []
   const merged: string[] = []
   const rejectsFor: string[] = []

@@ -16,7 +16,7 @@ import {
 
 /**
  * Anonymous tier: `ssh railway.new` gives a free 2 vCPU / 2 GB VM with coding agents and a preview URL, no account
- * needed. Railway identifies the box by SSH key, so each project gets its own key and therefore its own computer.
+ * needed. Railway identifies the box by SSH key, so each project gets its own key and therefore its own sandbox.
  * Limits: 60 minutes to build, 3 boxes per IP per day, preview reachable only from the creating IP until claimed.
  */
 const HOST = "railway.new"
@@ -40,7 +40,7 @@ export async function identity(stateDir: string, projectDirectory: string): Prom
   const id = createHash("sha256").update(projectDirectory).digest("hex").slice(0, 16)
   const keyFile = path.join(dir, `${id}.key`)
   if (!existsSync(keyFile)) {
-    const result = await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", `opencode-railway-computer:${id}`, "-f", keyFile])
+    const result = await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", `opencode-railway-sandbox:${id}`, "-f", keyFile])
     if (result.code !== 0) throw new Error(`ssh-keygen failed: ${result.stderr}`)
   }
   return { keyFile, knownHosts: path.join(dir, "known_hosts") }
@@ -104,14 +104,14 @@ const urls = (value: unknown, prefix = ""): Array<[string, string]> =>
       ? [[prefix, value]]
       : []
 
-const MARKER = "__railway_computer_ready__"
+const MARKER = "__railway_sandbox_ready__"
 
 /** Throws AnonymousUnavailable when Railway refuses the anonymous box; returns the manifest otherwise. */
 export function classify(result: SSHResult) {
   const found = manifests(result.stderr)
   const refusal = found.find((manifest) => manifest.status === "error")
   const signup = result.stderr.match(/https:\/\/railway\.com\/ssh-signup\S*/)?.[0] ?? result.stdout.match(/https:\/\/railway\.com\/ssh-signup\S*/)?.[0]
-  if (refusal) throw new AnonymousUnavailable(String(refusal.description ?? "Anonymous Railway computers are unavailable."), signup)
+  if (refusal) throw new AnonymousUnavailable(String(refusal.description ?? "Anonymous Railway sandboxes are unavailable."), signup)
   if (!result.stdout.includes(MARKER)) {
     const text = `${result.stdout}\n${result.stderr}`.replace(/\s+/g, " ").trim()
     if (/unavailable|sign up|limit|try again/i.test(text)) throw new AnonymousUnavailable(text.slice(0, 300), signup)
@@ -126,7 +126,7 @@ export async function probe(vm: FreeVM) {
 }
 
 export async function runFreeVM(vm: FreeVM, input: RunInput, known: ReadonlyArray<Record<string, unknown>> = []): Promise<RunResult> {
-  input.progress("uploading workspace to anonymous Railway computer", { bytes: input.archive.byteLength })
+  input.progress("uploading workspace to anonymous Railway sandbox", { bytes: input.archive.byteLength })
   const setup = await ssh(
     vm,
     [
@@ -154,7 +154,7 @@ export async function runFreeVM(vm: FreeVM, input: RunInput, known: ReadonlyArra
   const claim = links.find(([key, url]) => /claim/i.test(key) || /claim/i.test(url))?.[1]
   const previewURL = links.find(([key, url]) => /preview/i.test(key) || /\.up\.railway\.app/.test(url))?.[1]
 
-  input.progress("running on anonymous Railway computer")
+  input.progress("running on anonymous Railway sandbox")
   const prompt = Buffer.from(remoteInstructions(input, previewURL)).toString("base64")
   const args = [
     "--format json",
@@ -195,14 +195,14 @@ export async function runFreeVM(vm: FreeVM, input: RunInput, known: ReadonlyArra
 
   const deadline = manifest.flatMap((entry) => Object.entries(entry)).find(([key]) => /deadline|expires/i.test(key))?.[1]
   const notes = [
-    "Ran on an anonymous Railway computer (free, no account). It is tied to this project's SSH key, so later runs reuse the same box.",
+    "Ran on an anonymous Railway sandbox (free, no account). It is tied to this project's SSH key, so later runs reuse the same box.",
     ...(deadline ? [`Build window ends: ${String(deadline)}.`] : []),
     ...(claim ? [`Claim link (sign up to keep the box and make its URL shareable): ${claim}`] : []),
     ...(manifest.length ? [] : ["Railway did not include a welcome manifest on this connection; the preview URL and claim link are in the first connect's output."]),
   ]
   const base = {
     backend: "free-vm" as const,
-    computer: "anonymous railway.new box",
+    sandbox: "anonymous railway.new box",
     outcome: errors.length && !texts.length ? "failed" : "succeeded",
     text: texts.join("").trim() || errors.join("\n") || "Remote subagent finished without a text response.",
     patch,

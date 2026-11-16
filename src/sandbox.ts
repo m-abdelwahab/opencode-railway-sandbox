@@ -98,7 +98,7 @@ const chronological = (messages: ReadonlyArray<RemoteMessage>) =>
   messages.toSorted((a, b) => (a.time?.created ?? 0) - (b.time?.created ?? 0))
 
 /**
- * Abort reason meaning "stop watching, keep the computer": used when the plugin reloads, so a new instance can resume
+ * Abort reason meaning "stop watching, keep the sandbox": used when the plugin reloads, so a new instance can resume
  * following the task instead of the work being thrown away.
  */
 export class Detached extends Error {}
@@ -212,7 +212,7 @@ export async function startSandbox(options: SandboxOptions, input: RunInput): Pr
     input.progress("running", { sessionID: session.id })
     return { sandbox, handle: { sandboxID: sandbox.id, url, password, sessionID: session.id, previewDomain } }
   } catch (error) {
-    // Nothing can resume a task that never started, so the computer goes even when detaching.
+    // Nothing can resume a task that never started, so the sandbox goes even when detaching.
     await dispose()
     throw error
   }
@@ -284,7 +284,7 @@ export async function followSandbox(
     const [diffstat = "", patch = ""] = diff.stdout.split("---PATCH---\n")
     const base = {
       backend: "sandbox" as const,
-      computer: sandbox.id,
+      sandbox: sandbox.id,
       outcome: final.outcome ?? "unknown",
       text: text || "Remote subagent finished without a text response.",
       patch,

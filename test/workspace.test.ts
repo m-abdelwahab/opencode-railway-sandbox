@@ -6,7 +6,7 @@ import path from "node:path"
 import { pack } from "../src/workspace.ts"
 
 test("packs tracked and untracked files, skipping ignored and deleted ones", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "rc-pack-"))
+  const dir = mkdtempSync(path.join(os.tmpdir(), "rs-pack-"))
   try {
     execSync("git init -q", { cwd: dir })
     writeFileSync(path.join(dir, ".gitignore"), "node_modules\n.env\n")

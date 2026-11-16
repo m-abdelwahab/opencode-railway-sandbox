@@ -28,20 +28,20 @@ KEEP=1 RAILWAY_API_TOKEN=... RAILWAY_ENVIRONMENT_ID=... \
 
    ```jsonc
    // /tmp/e2e/opencode.jsonc
-   { "plugins": [{ "package": "/path/to/opencode-railway-computer", "options": { "project": "my-project" } }] }
+   { "plugins": [{ "package": "/path/to/opencode-railway-sandbox", "options": { "project": "my-project" } }] }
    ```
 
 2. Check that the plugin loaded and the integration registered:
 
    ```bash
-   opencode api get '/api/plugin?location[directory]=/tmp/e2e/app'       # railway-computer: active
+   opencode api get '/api/plugin?location[directory]=/tmp/e2e/app'       # railway-sandbox: active
    opencode api get '/api/integration?location[directory]=/tmp/e2e/app'  # "Railway" with oauth, key, env
    ```
 
 3. Drive the scenario with `opencode run` from the project directory:
 
    ```bash
-   opencode run --format json "I'm working on X. Run the build remotely and give me a preview URL I can share. Use the Railway Computer plugin."
+   opencode run --format json "I'm working on X. Run the build remotely and give me a preview URL I can share. Use the Railway Sandbox plugin."
    ```
 
 4. Background results arrive as a synthetic message. Read them with
@@ -55,7 +55,7 @@ KEEP=1 RAILWAY_API_TOKEN=... RAILWAY_ENVIRONMENT_ID=... \
 | 2 | No account connected and anonymous tier capped ("The agent path is temporarily unavailable") → tool starts Railway OAuth and the agent relays the sign-in link | ✅ |
 | 3 | Sign in with Railway (public client + PKCE, loopback `127.0.0.1:19876`) stores a credential labelled with the account email | ✅ |
 | 4 | OAuth token with `project:member` resolves the shared project/environment via `externalWorkspaces` | ✅ (after fix: `me.workspaces` is not authorized for project-scoped tokens) |
-| 5 | Signed-in scenario: agent edits code locally, calls `railway_computer(preview: true)` in the background; the report arrives about 83s later and wakes the parent agent | ✅ |
+| 5 | Signed-in scenario: agent edits code locally, calls `railway_sandbox(preview: true)` in the background; the report arrives about 83s later and wakes the parent agent | ✅ |
 | 6 | Remote agent installs, builds, sets Vite `allowedHosts`, verifies via the public URL; plugin swaps the server for the app | ✅ HTTP 200, rendered in a real browser with the new item |
 | 7 | Returned patch applies cleanly to the local checkout (`git apply --check`) | ✅ |
 | 8 | Standalone: test-fix task (sandbox ready in 2.7s, OpenCode serving in ~10s, done in 31s) | ✅ |
@@ -79,9 +79,9 @@ KEEP=1 RAILWAY_API_TOKEN=... RAILWAY_ENVIRONMENT_ID=... \
 
 | # | Scenario | Result |
 |---|---|---|
-| 11 | `railway_computer_variables` lists the project's services and variable names (no values) with an OAuth token | ✅ Postgres: DATABASE_URL, PGHOST, … |
+| 11 | `railway_sandbox_variables` lists the project's services and variable names (no values) with an OAuth token | ✅ Postgres: DATABASE_URL, PGHOST, … |
 | 12 | Agent passes `{"DATABASE_URL": "${{Postgres.DATABASE_URL}}"}`; the remote agent reaches the private Postgres, creates a table, inserts rows, prints `count: 3` | ✅ |
-| 13 | `railway_computer_apply` check + apply; an unrelated uncommitted local edit is preserved | ✅ |
+| 13 | `railway_sandbox_apply` check + apply; an unrelated uncommitted local edit is preserved | ✅ |
 | 14 | Unit: clean apply, check-only, three-way merge keeping nearby local edits (index untouched), real conflict markers, `.rej` outside git | ✅ 10 tests |
 | 15 | Forced plugin reload mid-task: new instance logs "Resumed after a plugin reload", finishes, and exactly one report is delivered | ✅ |
 | 16 | OpenAI OAuth login forwarded as an access token; the remote run succeeds on `openai/gpt-6.1-terra-fast` | ✅ |

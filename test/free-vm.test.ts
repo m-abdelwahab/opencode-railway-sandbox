@@ -30,6 +30,6 @@ describe("classify", () => {
 
   test("success returns the welcome manifest", () => {
     const manifest = { preview_url: "https://box.up.railway.app", claim_url: "https://railway.com/claim/abc" }
-    expect(classify({ code: 0, stdout: "__railway_computer_ready__\n", stderr: JSON.stringify(manifest) + "\n" })).toEqual([manifest])
+    expect(classify({ code: 0, stdout: "__railway_sandbox_ready__\n", stderr: JSON.stringify(manifest) + "\n" })).toEqual([manifest])
   })
 })

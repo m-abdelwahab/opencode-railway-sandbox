@@ -29,7 +29,7 @@ const result = await runSandbox(
     progress: (status, detail) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s] ${status} ${detail ? JSON.stringify(detail) : ""}`),
   },
 )
-console.log("outcome:", result.outcome, "computer:", result.computer)
+console.log("outcome:", result.outcome, "sandbox:", result.sandbox)
 console.log("text:\n" + result.text)
 console.log("diffstat:\n" + result.diffstat)
 console.log("preview:", JSON.stringify(result.preview, null, 2))

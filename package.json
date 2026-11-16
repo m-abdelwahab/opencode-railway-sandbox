@@ -1,7 +1,7 @@
 {
-  "name": "opencode-railway-computer",
+  "name": "opencode-railway-sandbox",
   "version": "0.1.0",
-  "description": "Give OpenCode agents a Railway computer: run subagents, builds, and previews in Railway VMs instead of your laptop",
+  "description": "Give OpenCode agents a Railway sandbox: run subagents, builds, and previews in Railway VMs instead of your laptop",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -44,7 +44,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/m-abdelwahab/opencode-railway-computer.git"
+    "url": "git+https://github.com/m-abdelwahab/opencode-railway-sandbox.git"
   },
   "engines": {
     "node": ">=22"
@@ -54,7 +54,7 @@
     "provenance": true
   },
   "bugs": {
-    "url": "https://github.com/m-abdelwahab/opencode-railway-computer/issues"
+    "url": "https://github.com/m-abdelwahab/opencode-railway-sandbox/issues"
   },
-  "homepage": "https://github.com/m-abdelwahab/opencode-railway-computer#readme"
+  "homepage": "https://github.com/m-abdelwahab/opencode-railway-sandbox#readme"
 }

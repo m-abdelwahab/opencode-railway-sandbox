@@ -1,6 +1,6 @@
-# Railway Computer for OpenCode
+# Railway Sandbox for OpenCode
 
-Give your OpenCode agents a computer of their own. `opencode-railway-computer` adds a `railway_computer` tool that runs
+Give your OpenCode agents a sandbox of their own. `opencode-railway-sandbox` adds a `railway_sandbox` tool that runs
 a subagent on a fresh Railway VM instead of your laptop: it copies your project over, runs a headless OpenCode agent
 there with full permissions, and hands back a report, a reviewable patch, and (optionally) a live preview URL.
 
@@ -8,7 +8,7 @@ there with full permissions, and hands back a report, a reviewable patch, and (o
 You: I'm working on the launch board. Add a "Preview URLs" item, run the build remotely,
      and give me a preview URL I can share.
 
-Agent: [edits src/main.js] → railway_computer(preview: true)
+Agent: [edits src/main.js] → railway_sandbox(preview: true)
        ... Railway sandbox: npm install, vite build, vite preview ...
        Preview URL: https://opencode-remote-agents-8080-….up.railway.app (HTTP 200, shareable)
 ```
@@ -23,22 +23,22 @@ Agent: [edits src/main.js] → railway_computer(preview: true)
 ```text
 OpenCode (your machine)                         Railway
 ┌──────────────────────────┐                    ┌───────────────────────────────────┐
-│ parent agent             │  railway_computer  │ VM (Sandbox or free railway.new)   │
-│  └─ railway-computer ────┼──── tarball ──────►│  /root/workspace (baseline commit) │
+│ parent agent             │  railway_sandbox   │ VM (Sandbox or free railway.new)   │
+│  └─ railway-sandbox ─────┼──── tarball ──────►│  /root/workspace (baseline commit) │
 │     plugin               │                    │  opencode serve / opencode run     │
 │                          │◄─── report+patch ──┤  headless agent, all permissions   │
-│  <railway_computer> msg  │◄─── preview URL ───┤  app on $PORT=8080 → public HTTPS  │
+│  <railway_sandbox> msg   │◄─── preview URL ───┤  app on $PORT=8080 → public HTTPS  │
 └──────────────────────────┘                    └───────────────────────────────────┘
 ```
 
 1. **Pack.** Git-tracked and untracked-but-not-ignored files (exactly what your local agent sees, minus `.git` and
    ignored output such as `node_modules`). Non-git directories are tarred without `node_modules`/`.git`.
-2. **Pick a computer** (see [Tiers](#tiers)).
+2. **Pick a sandbox** (see [Tiers](#tiers)).
 3. **Run.** The remote OpenCode starts from a baseline commit, so its changes come back as an exact `git diff`.
    It runs without approval prompts (the VM is disposable) and the `question` tool is denied (nobody is attached).
-4. **Report.** By default the tool returns immediately and the result arrives later as a `<railway_computer>` message,
-   like OpenCode's built-in subagents. The patch is saved to `$TMPDIR/opencode-railway-computer/<task>.patch` and is
-   **never applied automatically**; `railway_computer_apply` applies it on request.
+4. **Report.** By default the tool returns immediately and the result arrives later as a `<railway_sandbox>` message,
+   like OpenCode's built-in subagents. The patch is saved to `$TMPDIR/opencode-railway-sandbox/<task>.patch` and is
+   **never applied automatically**; `railway_sandbox_apply` applies it on request.
 5. **Preview** (`preview: true`). The remote agent is told the public URL, makes the app serve on `0.0.0.0:$PORT`
    (8080), verifies it through the public URL, and writes its start command. The plugin then swaps the agent server
    for the app and checks the URL answers.
@@ -57,7 +57,7 @@ OpenCode (your machine)                         Railway
 Selection order:
 
 1. A connected Railway account always wins (bigger machines, shareable previews).
-2. Otherwise the plugin tries an **anonymous** computer.
+2. Otherwise the plugin tries an **anonymous** sandbox.
 3. If Railway refuses the anonymous box (capacity, daily limit), the plugin starts **Sign in with Railway**, returns the
    link for the agent to relay, and starts the task automatically once you approve.
 
@@ -69,7 +69,7 @@ Selection order:
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      "package": "opencode-railway-computer",
+      "package": "opencode-railway-sandbox",
       "options": {
         // Optional; see Options below.
         "project": "my-railway-project",
@@ -79,7 +79,7 @@ Selection order:
 }
 ```
 
-During development, point `package` at a local checkout (`"/path/to/opencode-railway-computer"`) and build the Desktop
+During development, point `package` at a local checkout (`"/path/to/opencode-railway-sandbox"`) and build the Desktop
 panel with `bun run build` (or `bun run dev` to rebuild on change). OpenCode reloads a local plugin when its config or
 source changes; running sandbox tasks survive the reload (see below).
 
@@ -96,7 +96,7 @@ plugin's `model` option to a model from a provider you have connected with an AP
 
 ```jsonc
 {
-  "plugins": [{ "package": "opencode-railway-computer", "options": { "model": "openai/gpt-6.1-terra" } }],
+  "plugins": [{ "package": "opencode-railway-sandbox", "options": { "model": "openai/gpt-6.1-terra" } }],
 }
 ```
 
@@ -115,24 +115,24 @@ If nothing is connected and the anonymous tier is unavailable, the agent will te
 
 ## Tools
 
-### `railway_computer`
+### `railway_sandbox`
 
 | Input | Description |
 |---|---|
 | `description` | 3–5 word label |
 | `prompt` | Self-contained instructions; the remote agent cannot see your conversation |
 | `preview` | Build the app and serve it on a preview URL |
-| `variables` | Environment variables for the computer, as Railway references (see below) |
+| `variables` | Environment variables for the sandbox, as Railway references (see below) |
 | `agent` | Remote agent (default `build`) |
 | `model` | `provider/model#variant`, only when you ask for a specific model |
 | `wait` | Block until finished instead of running in the background |
 
-### `railway_computer_variables`
+### `railway_sandbox_variables`
 
 Lists the Railway project's services and the **names** of their variables (never values), so the agent can write
 references for `variables`.
 
-### `railway_computer_apply`
+### `railway_sandbox_apply`
 
 Applies a finished task's patch to the local project and reports what happened, trying three strategies in order:
 
@@ -145,7 +145,7 @@ Applies a finished task's patch to the local project and reports what happened, 
 It never touches your git index, and it asks for the same `edit` permission as OpenCode's edit tools, so agents that
 may not edit (such as Plan) cannot apply. `check: true` only reports whether the patch applies cleanly.
 
-### `railway_computer_stop`
+### `railway_sandbox_stop`
 
 Stops a task and destroys its sandbox (for example, to take a preview down early). Takes the task ID from the report.
 
@@ -156,10 +156,10 @@ With a Railway account, every sandbox joins the project environment's private ne
 the VM when it is created, so secrets never pass through your machine or the conversation:
 
 ```text
-You: Use a Railway computer connected to my Postgres to add a db-check script and run it.
+You: Use a Railway sandbox connected to my Postgres to add a db-check script and run it.
 
-Agent: railway_computer_variables()  → Postgres: DATABASE_URL, PGHOST, …
-       railway_computer(variables: { DATABASE_URL: "${{Postgres.DATABASE_URL}}" }, …)
+Agent: railway_sandbox_variables()  → Postgres: DATABASE_URL, PGHOST, …
+       railway_sandbox(variables: { DATABASE_URL: "${{Postgres.DATABASE_URL}}" }, …)
 ```
 
 Use `${{Service.VARIABLE}}` for service variables and `${{shared.VARIABLE}}` for shared ones. Defaults for every task
@@ -191,7 +191,7 @@ The panel is a GUI part (`./gui-experimental`), which OpenCode Desktop loads onl
 | `environmentId` | — | Skip discovery entirely |
 | `model` | parent session's model | Default remote model |
 | `agent` | `build` | Default remote agent |
-| `anonymous` | `true` | Try a free `railway.new` computer when no account is connected |
+| `anonymous` | `true` | Try a free `railway.new` sandbox when no account is connected |
 | `variables` | — | Variables for every task, e.g. `{ "DATABASE_URL": "${{Postgres.DATABASE_URL}}" }` |
 | `previewMinutes` | `60` | How long a preview stays up before the VM shuts itself down |
 | `maxMinutes` | `120` | Hard cap on a sandbox task, enforced inside the VM |

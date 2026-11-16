@@ -1,12 +1,12 @@
 import { Rpc } from "@opencode/plugin/rpc"
 
-const computer = {
+const sandbox = {
   type: "object",
   properties: {
     task: { type: "string" },
     description: { type: "string" },
     backend: { type: "string", enum: ["sandbox", "free-vm", "pending"] },
-    computer: { type: "string" },
+    sandbox: { type: "string" },
     status: {
       type: "string",
       enum: ["awaiting-sign-in", "running", "previewing", "finished", "failed", "stopped", "expired"],
@@ -28,15 +28,15 @@ const computer = {
 } as const
 
 /** Contract between the server part and the Desktop panel (and any other client). */
-export const RailwayComputer = Rpc.define({
-  id: "railway-computer",
+export const RailwaySandbox = Rpc.define({
+  id: "railway-sandbox",
   methods: {
     list: {
       input: { type: "object", additionalProperties: false },
       output: {
         type: "object",
-        properties: { computers: { type: "array", items: computer } },
-        required: ["computers"],
+        properties: { sandboxes: { type: "array", items: sandbox } },
+        required: ["sandboxes"],
         additionalProperties: false,
       },
     },

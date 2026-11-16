@@ -1,19 +1,19 @@
 import { createSignal, For, onCleanup, Show } from "solid-js"
 import { Schema } from "effect"
 import { Command, MenuItem, Panel, Plugin, Store, Style, usePlugin, type PanelTab } from "@opencode/plugin/gui"
-import { RailwayComputer } from "./rpc"
-import type { ComputerRecord } from "./state"
+import { RailwaySandbox } from "./rpc"
+import type { SandboxRecord } from "./state"
 
 const definition = Plugin.define({
   stores: {
-    // "active" hides finished, failed, stopped, and expired computers.
+    // "active" hides finished, failed, stopped, and expired sandboxes.
     view: Store.global(Schema.Struct({ filter: Schema.Literals(["active", "all"]) }), { filter: "active" }),
   },
   i18n: {
     en: {
       title: "Railway Sandboxes",
       "command.toggle": "Show Railway Sandboxes",
-      empty: "No Railway sandboxes yet. Ask the agent to run something on a Railway computer, for example a build with a preview.",
+      empty: "No Railway sandboxes yet. Ask the agent to run something on a Railway sandbox, for example a build with a preview.",
       "empty.active": "No sandboxes are running right now.",
       "filter.label": "Filter sandboxes",
       "filter.active": "Active",
@@ -35,29 +35,29 @@ const definition = Plugin.define({
 })
 
 const css = `
-.rc-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; font-size: 13px; line-height: 1.4; }
-.rc-head { display: flex; align-items: center; justify-content: space-between; }
-.rc-head h2 { font-size: 13px; font-weight: 600; margin: 0; flex: 1; }
-.rc-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(127,127,127,0.12); }
-.rc-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 10px; border: 0;
+.rs-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; font-size: 13px; line-height: 1.4; }
+.rs-head { display: flex; align-items: center; justify-content: space-between; }
+.rs-head h2 { font-size: 13px; font-weight: 600; margin: 0; flex: 1; }
+.rs-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(127,127,127,0.12); }
+.rs-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 10px; border: 0;
   border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 12px; opacity: 0.7; cursor: pointer; }
-.rc-tab:hover { opacity: 1; }
-.rc-tab[aria-selected="true"] { opacity: 1; background: rgba(127,127,127,0.22); font-weight: 600; }
-.rc-tab:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
-.rc-count { font-size: 11px; opacity: 0.7; font-variant-numeric: tabular-nums; }
-.rc-empty, .rc-muted { opacity: 0.65; }
-.rc-row { border: 1px solid rgba(127,127,127,0.25); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
-.rc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.rc-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rc-chip { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
-.rc-chip[data-status="running"], .rc-chip[data-status="previewing"] { color: #3fb950; }
-.rc-chip[data-status="awaiting-sign-in"] { color: #d29922; }
-.rc-chip[data-status="failed"] { color: #f85149; }
-.rc-chip[data-status="finished"], .rc-chip[data-status="stopped"], .rc-chip[data-status="expired"] { opacity: 0.6; }
-.rc-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; opacity: 0.75; }
-.rc-detail { font-size: 12px; opacity: 0.8; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.rc-preview { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.rc-preview a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; cursor: pointer; text-decoration: underline; }
+.rs-tab:hover { opacity: 1; }
+.rs-tab[aria-selected="true"] { opacity: 1; background: rgba(127,127,127,0.22); font-weight: 600; }
+.rs-tab:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.rs-count { font-size: 11px; opacity: 0.7; font-variant-numeric: tabular-nums; }
+.rs-empty, .rs-muted { opacity: 0.65; }
+.rs-row { border: 1px solid rgba(127,127,127,0.25); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.rs-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rs-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-chip { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.rs-chip[data-status="running"], .rs-chip[data-status="previewing"] { color: #3fb950; }
+.rs-chip[data-status="awaiting-sign-in"] { color: #d29922; }
+.rs-chip[data-status="failed"] { color: #f85149; }
+.rs-chip[data-status="finished"], .rs-chip[data-status="stopped"], .rs-chip[data-status="expired"] { opacity: 0.6; }
+.rs-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; opacity: 0.75; }
+.rs-detail { font-size: 12px; opacity: 0.8; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.rs-preview { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.rs-preview a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; cursor: pointer; text-decoration: underline; }
 `
 
 const LIVE = new Set(["awaiting-sign-in", "running", "previewing"])
@@ -75,19 +75,19 @@ const ago = (ms: number) => {
   return minutes < 1 ? "just now" : minutes < 60 ? `${minutes}m ago` : `${Math.round(minutes / 60)}h ago`
 }
 
-function ComputersView() {
+function SandboxesView() {
   const ctx = usePlugin<typeof definition>()
   const ui = ctx.ui
-  const [computers, setComputers] = createSignal<ComputerRecord[]>([])
+  const [sandboxes, setSandboxes] = createSignal<SandboxRecord[]>([])
   const [error, setError] = createSignal(false)
   const [busy, setBusy] = createSignal<string>()
   const [now, setNow] = createSignal(Date.now())
-  const rpc = () => ctx.client.rpc(RailwayComputer)
+  const rpc = () => ctx.client.rpc(RailwaySandbox)
 
   const load = async () => {
     try {
-      const result = (await rpc().list({})) as { computers: ComputerRecord[] }
-      setComputers(result.computers)
+      const result = (await rpc().list({})) as { sandboxes: SandboxRecord[] }
+      setSandboxes(result.sandboxes)
       setError(false)
     } catch {
       setError(true)
@@ -96,7 +96,7 @@ function ComputersView() {
 
   void load()
   const tick = setInterval(() => setNow(Date.now()), 1000)
-  // Events keep the list current; the slow poll catches computers that expired while nobody was listening.
+  // Events keep the list current; the slow poll catches sandboxes that expired while nobody was listening.
   const poll = setInterval(() => void load(), 15_000)
   const unsubscribe = rpc().events.on("updated", () => void load())
   onCleanup(() => {
@@ -116,22 +116,22 @@ function ComputersView() {
     }
   }
 
-  const status = (computer: ComputerRecord) =>
-    LIVE.has(computer.status) && computer.expiresAt !== undefined && computer.expiresAt < now() ? "expired" : computer.status
-  const active = () => computers().filter((computer) => LIVE.has(status(computer)))
+  const status = (sandbox: SandboxRecord) =>
+    LIVE.has(sandbox.status) && sandbox.expiresAt !== undefined && sandbox.expiresAt < now() ? "expired" : sandbox.status
+  const active = () => sandboxes().filter((sandbox) => LIVE.has(status(sandbox)))
   const filter = () => ctx.stores.view.value.filter
-  const shown = () => (filter() === "active" ? active() : computers())
+  const shown = () => (filter() === "active" ? active() : sandboxes())
 
   return (
-    <div class="rc-panel">
-      <div class="rc-head">
+    <div class="rs-panel">
+      <div class="rs-head">
         <h2>{ctx.t("title")}</h2>
         <ui.Tooltip value={ctx.t("refresh")}>
           <ui.IconButton icon="refresh" label={ctx.t("refresh")} onClick={() => void load()} />
         </ui.Tooltip>
       </div>
       <div
-        class="rc-tabs"
+        class="rs-tabs"
         role="tablist"
         aria-label={ctx.t("filter.label")}
         onKeyDown={(event) => {
@@ -145,7 +145,7 @@ function ComputersView() {
           {(value) => (
             <button
               type="button"
-              class="rc-tab"
+              class="rs-tab"
               role="tab"
               data-filter={value}
               aria-selected={filter() === value}
@@ -153,52 +153,52 @@ function ComputersView() {
               onClick={() => ctx.stores.view.set({ filter: value })}
             >
               {ctx.t(`filter.${value}`)}
-              <span class="rc-count">{value === "active" ? active().length : computers().length}</span>
+              <span class="rs-count">{value === "active" ? active().length : sandboxes().length}</span>
             </button>
           )}
         </For>
       </div>
       <Show when={error()}>
-        <div class="rc-muted">{ctx.t("unreachable")}</div>
+        <div class="rs-muted">{ctx.t("unreachable")}</div>
       </Show>
       <Show
         when={shown().length > 0}
-        fallback={<div class="rc-empty">{computers().length && filter() === "active" ? ctx.t("empty.active") : ctx.t("empty")}</div>}
+        fallback={<div class="rs-empty">{sandboxes().length && filter() === "active" ? ctx.t("empty.active") : ctx.t("empty")}</div>}
       >
         <For each={shown()}>
-          {(computer) => (
-            <div class="rc-row" data-task={computer.task}>
-              <div class="rc-top">
-                <ui.Icon name={computer.backend === "free-vm" ? "outline-globe" : "server"} size="small" />
-                <span class="rc-name" title={computer.description}>
-                  {computer.description}
+          {(sandbox) => (
+            <div class="rs-row" data-task={sandbox.task}>
+              <div class="rs-top">
+                <ui.Icon name={sandbox.backend === "free-vm" ? "outline-globe" : "server"} size="small" />
+                <span class="rs-name" title={sandbox.description}>
+                  {sandbox.description}
                 </span>
-                <span class="rc-chip" data-status={status(computer)}>
-                  {status(computer)}
+                <span class="rs-chip" data-status={status(sandbox)}>
+                  {status(sandbox)}
                 </span>
               </div>
-              <div class="rc-meta">
-                <span>{computer.directory.split("/").filter(Boolean).at(-1)}</span>
-                <span>{computer.backend === "free-vm" ? "anonymous" : computer.backend}</span>
-                <span>started {ago(now() - computer.startedAt)}</span>
-                <Show when={LIVE.has(status(computer)) && computer.expiresAt}>
+              <div class="rs-meta">
+                <span>{sandbox.directory.split("/").filter(Boolean).at(-1)}</span>
+                <span>{sandbox.backend === "free-vm" ? "anonymous" : sandbox.backend}</span>
+                <span>started {ago(now() - sandbox.startedAt)}</span>
+                <Show when={LIVE.has(status(sandbox)) && sandbox.expiresAt}>
                   {(expires) => <span>{ctx.t("left", { time: remaining(expires() - now()) })}</span>}
                 </Show>
-                <Show when={computer.patchFile}>
-                  <span>{computer.applied ? ctx.t("applied") : ctx.t("patch")}</span>
+                <Show when={sandbox.patchFile}>
+                  <span>{sandbox.applied ? ctx.t("applied") : ctx.t("patch")}</span>
                 </Show>
-                <Show when={computer.variables?.length}>
-                  <span>env: {computer.variables!.join(", ")}</span>
+                <Show when={sandbox.variables?.length}>
+                  <span>env: {sandbox.variables!.join(", ")}</span>
                 </Show>
               </div>
-              <Show when={computer.detail}>
-                <div class="rc-detail" title={computer.detail}>
-                  {computer.detail}
+              <Show when={sandbox.detail}>
+                <div class="rs-detail" title={sandbox.detail}>
+                  {sandbox.detail}
                 </div>
               </Show>
-              <Show when={computer.previewURL && status(computer) === "previewing" ? computer.previewURL : undefined}>
+              <Show when={sandbox.previewURL && status(sandbox) === "previewing" ? sandbox.previewURL : undefined}>
                 {(url) => (
-                  <div class="rc-preview">
+                  <div class="rs-preview">
                     <a onClick={() => ctx.system.openExternal(url())} title={ctx.t("open")}>
                       {url().replace(/^https:\/\//, "")}
                     </a>
@@ -215,12 +215,12 @@ function ComputersView() {
                   </div>
                 )}
               </Show>
-              <Show when={computer.previewURL && computer.shareable === false}>
-                <div class="rc-muted">{ctx.t("private")}</div>
+              <Show when={sandbox.previewURL && sandbox.shareable === false}>
+                <div class="rs-muted">{ctx.t("private")}</div>
               </Show>
-              <Show when={LIVE.has(status(computer)) && computer.backend === "sandbox"}>
+              <Show when={LIVE.has(status(sandbox)) && sandbox.backend === "sandbox"}>
                 <div>
-                  <ui.Button busy={busy() === computer.task} onClick={() => void stop(computer.task)}>
+                  <ui.Button busy={busy() === sandbox.task} onClick={() => void stop(sandbox.task)}>
                     {ctx.t("stop")}
                   </ui.Button>
                 </div>
@@ -252,7 +252,7 @@ export default Plugin.define({
       region: "side",
       width: 380,
       list: (input) => (input.open.includes("main") ? [tab] : []),
-      render: () => <ComputersView />,
+      render: () => <SandboxesView />,
     })
     ctx.add(
       MenuItem,
@@ -276,7 +276,7 @@ export default Plugin.define({
       (): Command => ({
         id: "toggle",
         title: ctx.t("command.toggle"),
-        keywords: "railway sandbox preview remote computer",
+        keywords: "railway sandbox preview remote sandbox",
         enabled: !!ctx.sessions.current(),
         run: () => {
           const session = ctx.sessions.current()

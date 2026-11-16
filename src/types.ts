@@ -20,13 +20,13 @@ export interface RunInput {
   readonly model?: ModelRef
   readonly credentials: ReadonlyArray<ForwardedCredential>
   /**
-   * Environment variables for the computer. Values may be Railway references such as `${{Postgres.DATABASE_URL}}`,
+   * Environment variables for the sandbox. Values may be Railway references such as `${{Postgres.DATABASE_URL}}`,
    * which Railway resolves when the sandbox is created, so secrets never pass through this machine.
    */
   readonly variables: Readonly<Record<string, string>>
   /** Build the app and leave it serving on $PORT, then return a preview URL. */
   readonly preview: boolean
-  /** How long a preview stays up before the computer shuts itself down. */
+  /** How long a preview stays up before the sandbox shuts itself down. */
   readonly previewMinutes: number
   readonly signal: AbortSignal
   readonly progress: Progress
@@ -43,7 +43,7 @@ export interface Preview {
 export interface RunResult {
   readonly backend: "sandbox" | "free-vm"
   /** Sandbox ID, or a description of the anonymous box. */
-  readonly computer: string
+  readonly sandbox: string
   readonly outcome: string
   readonly text: string
   readonly patch: string
@@ -51,7 +51,7 @@ export interface RunResult {
   readonly preview?: Preview
   /** Extra lines for the report, such as a claim link or the remote session URL. */
   readonly notes: ReadonlyArray<string>
-  /** Whether the computer is still running after the task. */
+  /** Whether the sandbox is still running after the task. */
   readonly running: boolean
   readonly dispose: () => Promise<void>
 }
@@ -71,11 +71,11 @@ export const PREVIEW_COMMAND_FILE = "/root/.preview-command"
 
 export const remoteInstructions = (input: Pick<RunInput, "prompt" | "preview" | "variables">, previewURL?: string) =>
   [
-    "You are a subagent running headless on a disposable Railway computer (a Linux VM), working on a copy of the user's project.",
+    "You are a subagent running headless on a disposable Railway sandbox (a Linux VM), working on a copy of the user's project.",
     ...(Object.keys(input.variables).length
       ? [
           `These environment variables are set for every command: ${Object.keys(input.variables).join(", ")}.`,
-          "This computer is on the Railway project's private network, so hosts like *.railway.internal resolve. Do not print secret values.",
+          "This sandbox is on the Railway project's private network, so hosts like *.railway.internal resolve. Do not print secret values.",
         ]
       : []),
     "Nobody can answer questions: make reasonable assumptions and finish the task autonomously.",

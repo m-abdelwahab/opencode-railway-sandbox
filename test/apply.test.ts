@@ -9,7 +9,7 @@ const dirs: string[] = []
 afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })))
 
 const tmp = () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "rc-apply-"))
+  const dir = mkdtempSync(path.join(os.tmpdir(), "rs-apply-"))
   dirs.push(dir)
   return dir
 }

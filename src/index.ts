@@ -7,19 +7,19 @@ import { applyPatch, patchFiles, rememberPreimages } from "./apply.ts"
 import * as FreeVM from "./free-vm.ts"
 import * as OAuth from "./oauth.ts"
 import { listVariables, projectTokenScope, resolveEnvironment, SetupError, type RailwayAuth } from "./railway-auth.ts"
-import { RailwayComputer } from "./rpc.ts"
+import { RailwaySandbox } from "./rpc.ts"
 import { destroySandbox, Detached, followSandbox, runSandbox, type Handle } from "./sandbox.ts"
-import { createRegistry, isLive, type ComputerRecord } from "./state.ts"
+import { createRegistry, isLive, type SandboxRecord } from "./state.ts"
 import { AnonymousUnavailable, sleep, type ForwardedCredential, type ModelRef, type RunInput, type RunResult } from "./types.ts"
 import { pack } from "./workspace.ts"
 
-export const INTEGRATION_ID = "railway-computer"
-/** Public (native) OAuth client for "Railway Computer". PKCE only; there is no secret to protect. */
+export const INTEGRATION_ID = "railway-sandbox"
+/** Public (native) OAuth client for "Railway Sandbox". PKCE only; there is no secret to protect. */
 export const DEFAULT_OAUTH_CLIENT_ID = "rlwy_oaci_usmpkY8YlXHCXisdsEA1xmY4"
 const OAUTH_METHOD_ID = "oauth"
-const TOOL = "railway_computer"
-const STATE_DIR = path.join(process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share"), "opencode-railway-computer")
-const PATCH_DIR = path.join(os.tmpdir(), "opencode-railway-computer")
+const TOOL = "railway_sandbox"
+const STATE_DIR = path.join(process.env.XDG_DATA_HOME ?? path.join(os.homedir(), ".local", "share"), "opencode-railway-sandbox")
+const PATCH_DIR = path.join(os.tmpdir(), "opencode-railway-sandbox")
 
 interface Options {
   readonly oauthClientId?: string
@@ -32,9 +32,9 @@ interface Options {
   /** Default remote model as "providerID/modelID#variant". Falls back to the parent session's model. */
   readonly model?: string
   readonly agent?: string
-  /** Try a free anonymous `ssh railway.new` computer before asking the user to sign in. Defaults to true. */
+  /** Try a free anonymous `ssh railway.new` sandbox before asking the user to sign in. Defaults to true. */
   readonly anonymous?: boolean
-  /** Variables for every computer, e.g. { "DATABASE_URL": "${{Postgres.DATABASE_URL}}" }. Needs a Railway account. */
+  /** Variables for every sandbox, e.g. { "DATABASE_URL": "${{Postgres.DATABASE_URL}}" }. Needs a Railway account. */
   readonly variables?: Record<string, string>
   readonly idleTimeoutMinutes?: number
   /** Hard cap on a sandbox task's runtime, enforced inside the VM. */
@@ -63,11 +63,11 @@ const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
  * Tasks some plugin instance in this process is following. A reload re-imports this module, so the set lives on
  * globalThis; it stops two instances (or an old and a new one) from following the same task.
  */
-const following: Set<string> = ((globalThis as Record<string, unknown>).__railwayComputerFollowing ??= new Set<string>()) as Set<string>
+const following: Set<string> = ((globalThis as Record<string, unknown>).__railwaySandboxFollowing ??= new Set<string>()) as Set<string>
 const handleKey = (task: string) => `handle/${task}`
 
 export default Plugin.define({
-  id: "railway-computer",
+  id: "railway-sandbox",
   async setup(ctx) {
     const options = ctx.options as Options
     const clientID = options.oauthClientId ?? process.env.OPENCODE_RAILWAY_OAUTH_CLIENT_ID ?? DEFAULT_OAUTH_CLIENT_ID
@@ -145,30 +145,30 @@ export default Plugin.define({
       return file
     }
 
-    /** Stops a task's computer: aborts it if this instance runs it, and destroys its sandbox. */
+    /** Stops a task's sandbox: aborts it if this instance runs it, and destroys its sandbox. */
     const stopTask = async (task: string): Promise<{ stopped: boolean; message: string }> => {
       const record = await registry.get(task)
       if (!record) return { stopped: false, message: `Unknown task ${task}.` }
       const local = running.get(task)
       local?.controller.abort(new Error("Stopped by the user"))
       if (record.backend === "free-vm") {
-        await registry.update(task, { status: "stopped", detail: "Stopped. Anonymous computers end with their build window." })
-        return { stopped: true, message: "Stopped tracking the anonymous computer; it shuts down when its build window ends." }
+        await registry.update(task, { status: "stopped", detail: "Stopped. Anonymous sandboxes end with their build window." })
+        return { stopped: true, message: "Stopped tracking the anonymous sandbox; it shuts down when its build window ends." }
       }
-      if (record.backend === "sandbox" && record.computer && isLive(record)) {
+      if (record.backend === "sandbox" && record.sandbox && isLive(record)) {
         const auth = await account()
         if (!auth) return { stopped: false, message: `No Railway account is connected. ${CONNECT_HINT}` }
-        await destroySandbox(auth, record.computer).catch((error) => {
+        await destroySandbox(auth, record.sandbox).catch((error) => {
           // Already gone (expired or destroyed elsewhere) is the outcome the user wants.
           if (!/not found/i.test(String(error))) throw error
         })
       }
       await registry.update(task, { status: "stopped", detail: "Stopped by the user." })
-      return { stopped: true, message: `Task ${task} stopped${record.computer ? ` and sandbox ${record.computer} destroyed` : ""}.` }
+      return { stopped: true, message: `Task ${task} stopped${record.sandbox ? ` and sandbox ${record.sandbox} destroyed` : ""}.` }
     }
 
-    const rpc = await ctx.rpc.register(RailwayComputer, {
-      list: async () => ({ computers: (await registry.list()) as never }),
+    const rpc = await ctx.rpc.register(RailwaySandbox, {
+      list: async () => ({ sandboxes: (await registry.list()) as never }),
       stop: async (input) => stopTask((input as { task: string }).task),
     })
     emit = (task) => rpc.events.emit("updated", { task })
@@ -180,12 +180,12 @@ export default Plugin.define({
               "Hint: the remote model ran out of quota. Retry with `model` set to a model from a provider connected in OpenCode with an API key or OAuth, or set the plugin's \"model\" option.",
             ]
           : []),
-        `<railway_computer task="${task}" backend="${result.backend}" outcome="${result.outcome}" computer="${result.computer}">`,
+        `<railway_sandbox task="${task}" backend="${result.backend}" outcome="${result.outcome}" sandbox="${result.sandbox}">`,
         result.text.trim(),
         "",
-        result.diffstat ? `Changes made on the Railway computer:\n${result.diffstat}` : "No file changes were made on the Railway computer.",
+        result.diffstat ? `Changes made on the Railway sandbox:\n${result.diffstat}` : "No file changes were made on the Railway sandbox.",
         ...(patchFile
-          ? [`The changes were NOT applied locally. Patch saved to ${patchFile}. Review it, then apply it with the railway_computer_apply tool (task "${task}") if appropriate.`]
+          ? [`The changes were NOT applied locally. Patch saved to ${patchFile}. Review it, then apply it with the railway_sandbox_apply tool (task "${task}") if appropriate.`]
           : []),
         ...(result.preview
           ? [
@@ -197,17 +197,17 @@ export default Plugin.define({
         ...notes,
         ...result.notes,
         result.running && result.backend === "sandbox"
-          ? `The sandbox ${result.computer} is still running; stop it early with railway_computer_stop (task "${task}").`
+          ? `The sandbox ${result.sandbox} is still running; stop it early with railway_sandbox_stop (task "${task}").`
           : result.backend === "sandbox"
             ? "The sandbox has been destroyed."
             : "",
-        `</railway_computer>`,
+        `</railway_sandbox>`,
       ]
         .filter((line, index, lines) => line !== "" || lines[index - 1] !== "")
         .join("\n")
 
     const deliver = (sessionID: string, description: string, text: string) =>
-      ctx.session.synthetic({ sessionID, text, description }).catch((error) => console.error("[railway-computer] delivery failed", error))
+      ctx.session.synthetic({ sessionID, text, description }).catch((error) => console.error("[railway-sandbox] delivery failed", error))
 
     /** Records a finished task, saves its patch, and returns the report for the parent session. */
     const complete = async (task: string, directory: string, startedAt: number, result: RunResult, notes: readonly string[]) => {
@@ -218,7 +218,7 @@ export default Plugin.define({
       await ctx.storage.remove(handleKey(task)).catch(() => {})
       await registry.update(task, {
         backend: result.backend,
-        computer: result.computer,
+        sandbox: result.sandbox,
         status: result.preview && live ? "previewing" : live && result.backend === "sandbox" ? "running" : "finished",
         detail: result.preview ? `Preview ${result.preview.check}` : `Finished: ${result.outcome}`,
         previewURL: result.preview?.url,
@@ -231,7 +231,7 @@ export default Plugin.define({
 
     /** Follows a task in the background and delivers its report; shared by new and resumed tasks. */
     const watch = (
-      record: Pick<ComputerRecord, "task" | "description" | "sessionID">,
+      record: Pick<SandboxRecord, "task" | "description" | "sessionID">,
       controller: AbortController,
       work: () => Promise<string>,
       /** Whether another instance can pick the task up after a reload: true once its handle is stored. */
@@ -240,18 +240,18 @@ export default Plugin.define({
       following.add(record.task)
       void work()
         .then(
-          (output) => deliver(record.sessionID, `Railway computer finished: ${record.description}`, output),
+          (output) => deliver(record.sessionID, `Railway sandbox finished: ${record.description}`, output),
           async (error) => {
             // A reload detaches. A task that stored its handle is resumed (and reported) by the next instance, which may
             // already have finished it, so this instance must stay silent. Anything else, such as an anonymous
-            // computer or a sandbox interrupted before it started, is lost, and the parent hears about it.
+            // sandbox or a sandbox interrupted before it started, is lost, and the parent hears about it.
             if (controller.signal.reason instanceof Detached && resumable()) return
             const message = error instanceof Error ? error.message : String(error)
             await registry.update(record.task, { status: controller.signal.aborted ? "stopped" : "failed", detail: message }).catch(() => {})
             await deliver(
               record.sessionID,
-              `Railway computer failed: ${record.description}`,
-              `<railway_computer task="${record.task}" outcome="failed">\n${message}\n</railway_computer>`,
+              `Railway sandbox failed: ${record.description}`,
+              `<railway_sandbox task="${record.task}" outcome="failed">\n${message}\n</railway_sandbox>`,
             )
           },
         )
@@ -296,13 +296,13 @@ export default Plugin.define({
         name: TOOL,
         options: { codemode: false },
         description: [
-          "Gives a subagent its own Railway computer (a fresh Linux VM) and runs a task there instead of on this machine.",
+          "Gives a subagent its own Railway sandbox (a fresh Linux VM) and runs a task there instead of on this machine.",
           "The project's files (git-tracked and untracked, excluding ignored files) are copied over; a headless OpenCode agent does the task with full permissions on that VM.",
           "Use it for builds, installs, test suites, risky or long-running experiments, parallel work, and for live previews: set preview=true to have the app built and served on a public URL.",
-          "To let the remote agent reach the Railway project's databases and services, pass `variables` with Railway references (find names with railway_computer_variables).",
-          "File changes come back as a patch; apply it with railway_computer_apply. They are never applied automatically.",
-          "Runs in the background by default: the call returns immediately and you receive a <railway_computer> message when it finishes. Do not poll.",
-          "Without a connected Railway account it uses a free anonymous Railway computer; if that is unavailable it returns a Railway sign-in link to relay to the user.",
+          "To let the remote agent reach the Railway project's databases and services, pass `variables` with Railway references (find names with railway_sandbox_variables).",
+          "File changes come back as a patch; apply it with railway_sandbox_apply. They are never applied automatically.",
+          "Runs in the background by default: the call returns immediately and you receive a <railway_sandbox> message when it finishes. Do not poll.",
+          "Without a connected Railway account it uses a free anonymous Railway sandbox; if that is unavailable it returns a Railway sign-in link to relay to the user.",
         ].join("\n"),
         input: {
           type: "object",
@@ -314,7 +314,7 @@ export default Plugin.define({
               type: "object",
               additionalProperties: { type: "string" },
               description:
-                'Environment variables for the remote computer, as NAME → value. Use Railway references instead of secret values, e.g. {"DATABASE_URL": "${{Postgres.DATABASE_URL}}"} or {"API_KEY": "${{shared.API_KEY}}"}; Railway resolves them inside the VM. Requires a Railway account; the computer joins the project\'s private network.',
+                'Environment variables for the remote sandbox, as NAME → value. Use Railway references instead of secret values, e.g. {"DATABASE_URL": "${{Postgres.DATABASE_URL}}"} or {"API_KEY": "${{shared.API_KEY}}"}; Railway resolves them inside the VM. Requires a Railway account; the sandbox joins the project\'s private network.',
             },
             agent: { type: "string", description: 'Remote agent to use. Defaults to "build".' },
             model: { type: "string", description: 'Only if the user asks for a specific model: "providerID/modelID" or "providerID/modelID#variant".' },
@@ -346,15 +346,15 @@ export default Plugin.define({
           let credentials = model ? await forward(model.providerID) : []
           const notes: string[] = []
           if (credentials === undefined) {
-            if (requested) throw new Error(`Provider "${model!.providerID}" uses a login that only works on this machine, so it cannot run on a Railway computer. Pick a model from a provider connected with an API key or OAuth.`)
+            if (requested) throw new Error(`Provider "${model!.providerID}" uses a login that only works on this machine, so it cannot run on a Railway sandbox. Pick a model from a provider connected with an API key or OAuth.`)
             notes.push(`The session's model (${model!.providerID}/${model!.id}) uses a login that only works on this machine, so the remote agent used OpenCode's default model instead.`)
             model = undefined
             credentials = []
           }
-          if (needsAccount) notes.push(`Environment variables set on the computer: ${Object.keys(variables).join(", ")}.`)
+          if (needsAccount) notes.push(`Environment variables set on the sandbox: ${Object.keys(variables).join(", ")}.`)
 
           const archive = await pack(directory)
-          const task = `rc_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+          const task = `rs_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
           const controller = new AbortController()
           const entry: { controller: AbortController; result?: RunResult } = { controller }
           running.set(task, entry)
@@ -363,7 +363,7 @@ export default Plugin.define({
           // Record the sandbox as soon as it exists, so the panel can stop a task that is still running.
           const track = (status: string, detail?: Record<string, unknown>) =>
             void registry
-              .update(task, { detail: status, ...(typeof detail?.sandboxID === "string" ? { computer: detail.sandboxID } : {}) })
+              .update(task, { detail: status, ...(typeof detail?.sandboxID === "string" ? { sandbox: detail.sandboxID } : {}) })
               .catch(() => {})
           const runInput = (progress: RunInput["progress"]): RunInput => ({
             archive: archive.archive,
@@ -406,7 +406,7 @@ export default Plugin.define({
             await registry.update(task, { status: controller.signal.aborted ? "stopped" : "failed", detail: message }).catch(() => {})
             return message
           }
-          const record = (backend: ComputerRecord["backend"], status: ComputerRecord["status"], detail: string) =>
+          const record = (backend: SandboxRecord["backend"], status: SandboxRecord["status"], detail: string) =>
             registry.put({
               task,
               description: input.description,
@@ -437,7 +437,7 @@ export default Plugin.define({
             throw error instanceof SetupError ? error : new Error(`Railway account check failed: ${String(error)}`)
           })
           let run: ((progress: RunInput["progress"]) => Promise<RunResult>) | undefined
-          let backend: ComputerRecord["backend"] = "pending"
+          let backend: SandboxRecord["backend"] = "pending"
           let where = ""
           let refusal: string | undefined
           if (auth) {
@@ -447,18 +447,18 @@ export default Plugin.define({
           } else if (needsAccount) {
             refusal = "Railway variables need a Railway account, and none is connected."
           } else if (options.anonymous !== false) {
-            // 2. No account: try a free anonymous computer.
+            // 2. No account: try a free anonymous sandbox.
             const vm = await FreeVM.identity(STATE_DIR, directory)
             const manifest = await FreeVM.probe(vm).catch((error) => {
               if (error instanceof AnonymousUnavailable) return error
               throw error
             })
             if (manifest instanceof AnonymousUnavailable)
-              refusal = `Free anonymous Railway computers are unavailable right now (${manifest.message}).`
+              refusal = `Free anonymous Railway sandboxes are unavailable right now (${manifest.message}).`
             else {
               run = (progress) => FreeVM.runFreeVM(vm, runInput(progress), manifest)
               backend = "free-vm"
-              where = "a free anonymous Railway computer (ssh railway.new)"
+              where = "a free anonymous Railway sandbox (ssh railway.new)"
             }
           }
 
@@ -480,7 +480,7 @@ export default Plugin.define({
               content: background(
                 [
                   `Task ${task} is starting on ${where} (${summary}).`,
-                  "It runs in the background; you will receive a <railway_computer> message when it finishes.",
+                  "It runs in the background; you will receive a <railway_sandbox> message when it finishes.",
                   "DO NOT sleep, poll, or duplicate its work. Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.",
                 ].join("\n"),
                 () => run(() => {}),
@@ -489,7 +489,7 @@ export default Plugin.define({
             }
           }
 
-          // 3. No account and no anonymous computer: hand off to Railway sign-in.
+          // 3. No account and no anonymous sandbox: hand off to Railway sign-in.
           const reason = refusal ?? "No Railway account is connected."
           const attempt = await ctx.integration.oauth
             .connect({ integrationID: INTEGRATION_ID, methodID: OAUTH_METHOD_ID })
@@ -509,7 +509,7 @@ export default Plugin.define({
                 reason,
                 `To continue on their own Railway account, the user must sign in with Railway here: ${attempt.url}`,
                 "Relay that link to the user now. The link expires in 10 minutes.",
-                `Task ${task} starts automatically as soon as they approve (${summary}); you will receive a <railway_computer> message when it finishes. Do not poll.`,
+                `Task ${task} starts automatically as soon as they approve (${summary}); you will receive a <railway_sandbox> message when it finishes. Do not poll.`,
               ].join("\n"),
               async () => {
                 while (true) {
@@ -534,7 +534,7 @@ export default Plugin.define({
         name: `${TOOL}_variables`,
         options: { codemode: false },
         description: [
-          "Lists the Railway project's services and the NAMES of their environment variables (never values), so you can pass references to railway_computer's `variables`.",
+          "Lists the Railway project's services and the NAMES of their environment variables (never values), so you can pass references to railway_sandbox's `variables`.",
           'Reference a service variable as ${{ServiceName.VARIABLE}} and a shared variable as ${{shared.VARIABLE}}, for example {"DATABASE_URL": "${{Postgres.DATABASE_URL}}"}.',
           "Requires a connected Railway account.",
         ].join("\n"),
@@ -558,14 +558,14 @@ export default Plugin.define({
         name: `${TOOL}_apply`,
         options: { codemode: false },
         description: [
-          "Applies the patch from a finished railway_computer task to the local project and reports the outcome.",
+          "Applies the patch from a finished railway_sandbox task to the local project and reports the outcome.",
           "Tries a clean apply, then a three-way merge (leaving conflict markers in conflicting files), then applies what it can and writes .rej files for the rest.",
           "Set check=true to only report whether it would apply cleanly.",
         ].join("\n"),
         input: {
           type: "object",
           properties: {
-            task: { type: "string", description: "The task ID from the <railway_computer> report" },
+            task: { type: "string", description: "The task ID from the <railway_sandbox> report" },
             check: { type: "boolean", description: "Only check whether the patch applies cleanly. Defaults to false." },
           },
           required: ["task"],
@@ -606,10 +606,10 @@ export default Plugin.define({
       editor.add({
         name: `${TOOL}_stop`,
         options: { codemode: false },
-        description: "Stops a railway_computer task and destroys its sandbox, for example to take a preview down early. Takes the task ID from the report.",
+        description: "Stops a railway_sandbox task and destroys its sandbox, for example to take a preview down early. Takes the task ID from the report.",
         input: {
           type: "object",
-          properties: { task: { type: "string", description: "The task ID from the <railway_computer> report" } },
+          properties: { task: { type: "string", description: "The task ID from the <railway_sandbox> report" } },
           required: ["task"],
           additionalProperties: false,
         },

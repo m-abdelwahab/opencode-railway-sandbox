@@ -6,15 +6,15 @@ The plugin is a single OpenCode V2 **server plugin** (`Plugin.define` from `@ope
 
 | Surface | Use |
 |---|---|
-| `ctx.integration.transform` | Registers the `railway-computer` integration ("Railway") with three methods: OAuth (`authorize` + `refresh`), project-token key, and `RAILWAY_TOKEN`/`RAILWAY_API_TOKEN` env |
+| `ctx.integration.transform` | Registers the `railway-sandbox` integration ("Railway") with three methods: OAuth (`authorize` + `refresh`), project-token key, and `RAILWAY_TOKEN`/`RAILWAY_API_TOKEN` env |
 | `ctx.integration.connection.active/resolve` | Reads the Railway credential (refreshing OAuth tokens when needed) and the model provider's credential for forwarding |
 | `ctx.integration.oauth.connect/status` | Starts Railway sign-in from inside a tool call when the anonymous tier is unavailable, and waits for it to complete |
-| `ctx.tool.transform` | Adds `railway_computer` and `railway_computer_stop` |
+| `ctx.tool.transform` | Adds `railway_sandbox` and `railway_sandbox_stop` |
 | `ctx.session.get` | Reads the parent session's model and directory |
 | `ctx.session.synthetic` | Delivers background results to the parent session, which wakes the parent agent (the same mechanism OpenCode's built-in subagents use) |
-| `ctx.permission.assert` | `railway_computer_apply` asks for `edit` on the patch's files, like OpenCode's own edit tools |
-| `ctx.storage` | Task registry (`computer/<task>`) and resumable handles (`handle/<task>`). Plugin storage is global per plugin ID, so every location's instance sees every task |
-| `ctx.rpc.register` | The `railway-computer` RPC (`list`, `stop`, and an `updated` event) that the Desktop panel calls |
+| `ctx.permission.assert` | `railway_sandbox_apply` asks for `edit` on the patch's files, like OpenCode's own edit tools |
+| `ctx.storage` | Task registry (`sandbox/<task>`) and resumable handles (`handle/<task>`). Plugin storage is global per plugin ID, so every location's instance sees every task |
+| `ctx.rpc.register` | The `railway-sandbox` RPC (`list`, `stop`, and an `updated` event) that the Desktop panel calls |
 
 The Desktop panel is the package's `./gui-experimental` part (`src/gui.tsx`, built with `@opencode/plugin/gui/vite`).
 It registers a side `Panel`, a `session.panel` `MenuItem`, and a `Command`; calls the RPC through `ctx.client`; and
@@ -23,13 +23,13 @@ keeps its Active/All filter in a `Store.global`.
 ## Task lifecycle
 
 ```text
-railway_computer ──► registry: running ──► start (sandbox, upload, serve, prompt) ──► handle stored
+railway_sandbox ──► registry: running ──► start (sandbox, upload, serve, prompt) ──► handle stored
                                                                                       │
              plugin reload ── Detached ──► new instance: resume(handle) ◄────────────┤
                                                                                       ▼
                      follow (poll; exec-channel fallback) ──► patch + preimages ──► registry: finished / previewing
                                                                                       │
-                                                    <railway_computer> synthetic ◄────┘
+                                                    <railway_sandbox> synthetic ◄────┘
 ```
 
 - **Reloads.** On unload the plugin aborts its watchers with a `Detached` reason: the sandbox is kept, and a task that
@@ -64,8 +64,8 @@ install + build + preview of a Vite app in ~70s.
 
 ### Anonymous → `ssh railway.new` (`src/free-vm.ts`)
 
-- One ed25519 key per project directory under `~/.local/share/opencode-railway-computer/free-vm/`. Railway maps a
-  key to a box, so a project keeps its computer across runs.
+- One ed25519 key per project directory under `~/.local/share/opencode-railway-sandbox/free-vm/`. Railway maps a
+  key to a box, so a project keeps its sandbox across runs.
 - Upload: the tarball is piped over SSH stdin to `tar -x`.
 - Run: `opencode run --format json --auto` over SSH, parsing its JSON event stream.
 - Railway's welcome manifest (JSON on stderr) supplies the preview URL, the build deadline, and the claim link.

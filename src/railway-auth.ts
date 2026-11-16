@@ -89,7 +89,7 @@ export async function resolveEnvironment(
   if (candidates.length > 1)
     throw new SetupError(
       `The connected Railway account can access several projects (${candidates.map((p) => p.name).join(", ")}). ` +
-        `Set the "project" option for the opencode-railway-computer plugin in opencode.json to choose one.`,
+        `Set the "project" option for the opencode-railway-sandbox plugin in opencode.json to choose one.`,
     )
   const project = candidates[0]!
   const wanted = placement.environment ?? "production"
