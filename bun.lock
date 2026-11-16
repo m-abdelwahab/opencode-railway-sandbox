@@ -5,7 +5,7 @@
     "": {
       "name": "opencode-railway-subagents",
       "dependencies": {
-        "@opencode/plugin": "2.3.0",
+        "@opencode/plugin": ">=2.3.0 <3",
         "railway": "^3.17.0",
       },
       "devDependencies": {

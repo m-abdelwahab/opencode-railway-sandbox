@@ -15,6 +15,9 @@ Agent: [edits src/main.js] → railway_computer(preview: true)
 
 > **Status:** early prototype. Tested end to end with OpenCode 2.3.0 and Railway Sandboxes (see [Testing](#testing)).
 
+> **Not affiliated with OpenCode.** This is a community plugin. It is not built by, endorsed by, or affiliated with the
+> OpenCode team.
+
 ## How it works
 
 ```text
@@ -83,6 +86,19 @@ source changes; running sandbox tasks survive the reload (see below).
 > **Gotcha:** if you add or change `exports` in `package.json` while OpenCode is running, its module resolver can keep
 > the old `package.json`, and the new parts (such as the Desktop panel) are not found. Restart OpenCode
 > (`opencode service restart`) to pick them up.
+
+### Choose a remote model
+
+The remote agent uses your session's model when its login can travel to another machine (API keys and OAuth logins
+such as OpenAI). Machine-bound logins, notably **Claude Agent**, cannot, and the remote agent then falls back to
+OpenCode's free default model, which is rate-limited and often exhausted. If you use Claude Agent locally, set the
+plugin's `model` option to a model from a provider you have connected with an API key or OAuth:
+
+```jsonc
+{
+  "plugins": [{ "package": "opencode-railway-computer", "options": { "model": "openai/gpt-6.1-terra" } }],
+}
+```
 
 ## Connect Railway
 
@@ -212,9 +228,40 @@ The panel is a GUI part (`./gui-experimental`), which OpenCode Desktop loads onl
 - OpenCode V2 does not yet let plugins place a child session on a remote workspace, so the remote run is not shown as
   a native child session. See [docs/architecture.md](docs/architecture.md).
 
+## Roadmap
+
+- **Checkpoint caching.** Save each project's installed dependencies as a
+  [sandbox checkpoint](https://docs.railway.com/sandboxes#checkpoints) and boot later tasks from it, so repeat runs skip
+  `npm install` (often most of a task's time).
+- **Native child sessions.** Ask OpenCode to let plugins register workspace drivers, so remote runs appear as native
+  child sessions instead of messages. The case is in [docs/architecture.md](docs/architecture.md#why-not-opencodes-native-workspaces).
+- **Better model fallback.** When the session's model cannot run remotely (Claude Agent), fall back to a connected
+  provider's model instead of OpenCode's quota-limited free model. Until then, set the `model` option
+  ([Choose a remote model](#choose-a-remote-model)).
+- **Anonymous tier hardening.** Verify the `ssh railway.new` happy path end to end; the welcome-manifest parsing is so far
+  tested only against refusals.
+- **Sign-in resilience.** Fallback loopback ports for the OAuth callback, and `wait: true` that continues after sign-in.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for what leaves your machine and how to report a vulnerability.
+
 ## Testing
 
 See [docs/testing.md](docs/testing.md) for the end-to-end checklist and the results of the last run.
+
+## Releasing
+
+CI (`.github/workflows/ci.yml`) typechecks, tests, builds the Desktop panel, and dry-runs `npm pack` on every push and
+pull request. Publishing a GitHub release publishes to npm (`.github/workflows/release.yml`):
+
+1. Bump `version` in `package.json`, commit, and push.
+2. Create a GitHub release tagged `v<version>` (the workflow fails if they differ).
+3. The workflow builds and runs `npm publish --provenance`.
+
+One-time setup: publish the first version manually (`npm login`, `bun run build`, `npm publish --access public`), then
+on npmjs.com add this repository as a **trusted publisher** (workflow `release.yml`, environment `npm`). After that no
+npm token is stored in GitHub.
 
 ## License
 

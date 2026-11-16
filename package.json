@@ -13,11 +13,12 @@
     "src",
     "dist",
     "README.md",
+    "SECURITY.md",
     "docs",
     "LICENSE"
   ],
   "dependencies": {
-    "@opencode/plugin": "2.3.0",
+    "@opencode/plugin": ">=2.3.0 <3",
     "railway": "^3.17.0"
   },
   "devDependencies": {
@@ -47,5 +48,13 @@
   },
   "engines": {
     "node": ">=22"
-  }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "bugs": {
+    "url": "https://github.com/m-abdelwahab/opencode-railway-computer/issues"
+  },
+  "homepage": "https://github.com/m-abdelwahab/opencode-railway-computer#readme"
 }
