@@ -1,0 +1,42 @@
+{
+  "name": "opencode-railway-computer",
+  "version": "0.1.0",
+  "description": "Give OpenCode agents a Railway computer: run subagents, builds, and previews in Railway VMs instead of your laptop",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "docs",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@opencode/plugin": "2.3.0",
+    "railway": "^3.17.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/bun": "latest"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc -p ."
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "railway",
+    "sandbox",
+    "remote-agents"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/m-abdelwahab/opencode-railway-computer.git"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
