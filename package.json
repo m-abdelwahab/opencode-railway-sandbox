@@ -1,6 +1,6 @@
 {
   "name": "opencode-railway-sandbox",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Give OpenCode agents a Railway sandbox: run subagents, builds, and previews in Railway VMs instead of your laptop",
   "type": "module",
   "license": "MIT",
