@@ -30,6 +30,8 @@ export interface RunInput {
   readonly previewMinutes: number
   readonly signal: AbortSignal
   readonly progress: Progress
+  /** When a follow-up was last sent to the remote agent; see followSandbox. */
+  readonly notBefore?: () => Promise<number | undefined>
 }
 
 export interface Preview {

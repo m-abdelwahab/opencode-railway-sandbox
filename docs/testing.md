@@ -104,3 +104,20 @@ KEEP=1 RAILWAY_API_TOKEN=... RAILWAY_ENVIRONMENT_ID=... \
   merge now uses `git merge-file` per file against the saved preimage.
 - The sandbox ID was recorded only at the end, so a running task could not be stopped from the panel. It is now recorded
   as soon as the sandbox exists.
+
+## Results of the third run (2026-11-17): live status, steering, watch links, multiple processes
+
+Run against an isolated `opencode serve` (`XDG_CONFIG_HOME` pointing at a config that loads the local checkout), sharing
+the machine's credentials.
+
+| # | Scenario | Result |
+|---|---|---|
+| 21 | "How's the sandbox doing? Give me a link to watch it live." → `railway_sandbox_status(watch: true)` mid-run: todo checklist, recent tool calls (including `sleep 90` still running), changed files, time left | ✅ |
+| 22 | Watch link: single-use pairing code from the sandbox's OpenCode 2.0.29; redeems with 302 + session cookie, web UI loads, second use 401 | ✅ (probe) |
+| 23 | "Tell it to also add a Testing section to the README" → `railway_sandbox_message` (steer) mid-run; the final patch includes `README.md` | ✅ |
+| 24 | Two OpenCode processes on one database: B leaves A's task alone while A's lease is fresh; A is killed mid-task; B takes over after the lease lapses and delivers exactly one report with the right patch | ✅ |
+
+### Bug found and fixed
+
+- A report was delivered twice: a second OpenCode process (the machine's regular service, which shares the database)
+  resumed a task another process was still following. Fixed with a cross-process lease and an idempotent delivery marker.

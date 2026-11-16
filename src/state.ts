@@ -79,6 +79,8 @@ export function createRegistry(ctx: Context, emit: (task: string) => Promise<voi
     for (const record of records) {
       if (!isLive(record) && now - record.updatedAt > RETAIN_MS) {
         await ctx.storage.remove(PREFIX + record.task)
+        await ctx.storage.remove(`delivered/${record.task}`)
+        await ctx.storage.remove(`lease/${record.task}`)
         continue
       }
       // A sandbox past its cap has shut itself down even if no instance was around to see it.

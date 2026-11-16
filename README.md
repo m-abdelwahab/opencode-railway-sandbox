@@ -164,6 +164,39 @@ If nothing is connected and the anonymous tier is unavailable, the agent will te
 | `model` | `provider/model#variant`, only when you ask for a specific model |
 | `wait` | Block until finished instead of running in the background |
 
+### `railway_sandbox_status`
+
+Shows what tasks are doing right now: the remote agent's todo list, its recent tool calls with output, its latest
+messages, files changed so far, and time left. Without a task ID it summarizes every active task. Pass `watch: true` to
+also get a single-use link (valid 5 minutes) that opens the remote OpenCode session live in a browser. The link is
+minted with OpenCode's pairing flow, so the server password never appears in a URL.
+
+The agent is told to use it only when you ask or when it needs progress to decide what to do next, never to poll:
+reports still arrive on their own.
+
+```text
+You: How's the sandbox doing? Give me a link to watch it.
+Agent: railway_sandbox_status(task, watch: true)
+       → running 1m, 119m left; todos: [x] extract data [~] pause [ ] run tests;
+         last tool: shell (running) sleep 90; files changed: package.json, src/main.js, src/launches.js
+         Watch live (single use): https://…up.railway.app/auth/connect/…
+```
+
+### `railway_sandbox_message`
+
+Sends a follow-up to a running task's remote agent, like continuing a subagent. `delivery: "steer"` (the default) adds
+it to the current turn; `"queue"` runs it after. The task still produces a single report once the remote agent has
+finished everything, including the follow-up.
+
+```text
+You: Tell it to also add a Testing section to the README.
+Agent: railway_sandbox_message(task, "Also add a 'Testing' section to README.md …")
+       … the final patch includes README.md
+```
+
+Status, messages, and watch links work for Railway Sandbox tasks while the remote agent runs. Anonymous `railway.new`
+tasks have no live session to inspect.
+
 ### `railway_sandbox_variables`
 
 Lists the Railway project's services and the **names** of their variables (never values), so the agent can write
@@ -211,6 +244,7 @@ palette (**Show Railway Sandboxes**). It lists your tasks across projects, showi
 - status and the time left before the sandbox shuts itself down
 - preview URLs, with open and copy buttons
 - patch state (ready or applied) and the injected variable names
+- **Watch live** for running tasks: opens the remote OpenCode session in your browser through a fresh single-use link
 - a **Stop and destroy** button for running sandboxes
 
 Tabs switch between **Active** (the default) and **All**, which adds finished, failed, and stopped tasks from the last
@@ -256,8 +290,10 @@ The panel is a GUI part (`./gui-experimental`), which OpenCode Desktop loads onl
 
 - Changes come back as a patch to review; they are not merged automatically.
 - The remote copy has a fresh one-commit history, not your git history.
-- Sandbox tasks survive plugin reloads (config edits, plugin updates): the plugin detaches, and the new instance
-  resumes following the task from a stored handle and still delivers the report. Anonymous (`ssh`) tasks cannot be
+- Sandbox tasks survive plugin reloads (config edits, plugin updates) and OpenCode restarts: the plugin detaches, and the
+  next instance resumes following the task from a stored handle and still delivers the report. Every OpenCode process on
+  a machine shares one database, so the process following a task holds a 90-second lease on it, and another process
+  takes over only after that lease lapses. Each report is delivered once. Anonymous (`ssh`) tasks cannot be
   resumed; the agent is told they were interrupted.
 - If the sandbox's public URL stops answering, the plugin talks to the remote OpenCode with `curl` inside the VM over
   Railway's exec channel, and tolerates up to 3 minutes without contact.

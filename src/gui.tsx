@@ -23,6 +23,8 @@ const definition = Plugin.define({
       copy: "Copy preview URL",
       copied: "Preview URL copied",
       stop: "Stop and destroy",
+      watch: "Watch live",
+      "watch.failed": "Could not open the live session",
       stopped: "Stopped",
       left: "{{time}} left",
       expired: "shut down",
@@ -44,6 +46,7 @@ const css = `
 .rs-tab:hover { opacity: 1; }
 .rs-tab[aria-selected="true"] { opacity: 1; background: rgba(127,127,127,0.22); font-weight: 600; }
 .rs-tab:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.rs-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 .rs-count { font-size: 11px; opacity: 0.7; font-variant-numeric: tabular-nums; }
 .rs-empty, .rs-muted { opacity: 0.65; }
 .rs-row { border: 1px solid rgba(127,127,127,0.25); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
@@ -113,6 +116,18 @@ function SandboxesView() {
     } finally {
       setBusy(undefined)
       void load()
+    }
+  }
+
+  const watch = async (task: string) => {
+    setBusy(`watch:${task}`)
+    try {
+      const result = (await rpc().watch({ task })) as { url: string }
+      ctx.system.openExternal(result.url)
+    } catch (error) {
+      ctx.toast.show({ title: ctx.t("watch.failed"), description: error instanceof Error ? error.message : String(error), variant: "error" })
+    } finally {
+      setBusy(undefined)
     }
   }
 
@@ -219,7 +234,12 @@ function SandboxesView() {
                 <div class="rs-muted">{ctx.t("private")}</div>
               </Show>
               <Show when={LIVE.has(status(sandbox)) && sandbox.backend === "sandbox"}>
-                <div>
+                <div class="rs-buttons">
+                  <Show when={status(sandbox) === "running"}>
+                    <ui.Button variant="contrast" busy={busy() === `watch:${sandbox.task}`} onClick={() => void watch(sandbox.task)}>
+                      {ctx.t("watch")}
+                    </ui.Button>
+                  </Show>
                   <ui.Button busy={busy() === sandbox.task} onClick={() => void stop(sandbox.task)}>
                     {ctx.t("stop")}
                   </ui.Button>

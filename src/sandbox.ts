@@ -89,7 +89,12 @@ interface RemoteSession {
 interface RemoteMessage {
   readonly type: string
   readonly time?: { readonly created?: number }
-  readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string; readonly name?: string }>
+  readonly content?: ReadonlyArray<{
+    readonly type: string
+    readonly text?: string
+    readonly name?: string
+    readonly state?: { readonly status?: string; readonly input?: unknown; readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }> }
+  }>
   readonly error?: unknown
 }
 
@@ -112,7 +117,13 @@ export interface Handle {
   readonly previewDomain?: string
 }
 
-type FollowInput = Pick<RunInput, "preview" | "previewMinutes" | "signal" | "progress">
+type FollowInput = Pick<RunInput, "preview" | "previewMinutes" | "signal" | "progress"> & {
+  /**
+   * When a follow-up was last sent to the remote agent. An idle session counts as finished only if it went idle after
+   * this, so a message sent just as the agent paused is not lost.
+   */
+  readonly notBefore?: () => Promise<number | undefined>
+}
 
 const connectOptions = (auth: RailwayAuth) => ({
   token: auth.token,
@@ -264,7 +275,10 @@ export async function followSandbox(
       if (status !== lastStatus) input.progress(status, { sessionID: session.id })
       lastStatus = status
       // The session was created fresh for this prompt, so an outcome plus an idle time means this run finished.
-      if (!Object.hasOwn(active ?? {}, session.id) && current.outcome !== undefined && current.time.idle !== undefined) break
+      if (!Object.hasOwn(active ?? {}, session.id) && current.outcome !== undefined && current.time.idle !== undefined) {
+        const sent = await input.notBefore?.().catch(() => undefined)
+        if (sent === undefined || current.time.idle >= sent) break
+      }
     }
 
     const lastAssistant = chronological(await remote.request<RemoteMessage[]>("GET", `/api/session/${session.id}/message`))
@@ -343,4 +357,86 @@ export async function runSandbox(options: SandboxOptions, input: RunInput, onSta
 export async function destroySandbox(auth: RailwayAuth, id: string) {
   const sandbox = await Sandbox.connect(id, connectOptions(auth))
   await sandbox.destroy()
+}
+
+// ---- Live access to a running task: status, follow-up messages, and a watch link -------------------------------
+
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text)
+const oneLine = (text: string) => text.replace(/\s+/g, " ").trim()
+
+/** The most telling field of a tool call's input: the command, path, pattern, or URL. */
+function describeInput(input: unknown) {
+  if (!input || typeof input !== "object") return ""
+  const record = input as Record<string, unknown>
+  const value = ["command", "path", "filePath", "pattern", "url", "query", "description"].map((key) => record[key]).find((v) => typeof v === "string")
+  return typeof value === "string" ? clip(oneLine(value), 160) : ""
+}
+
+export interface Activity {
+  readonly messages: number
+  readonly busy: boolean
+  /** The remote agent's most recent text, newest last. */
+  readonly said: readonly string[]
+  readonly tools: ReadonlyArray<{ readonly name: string; readonly status: string; readonly input: string; readonly output: string }>
+  readonly todos?: ReadonlyArray<{ readonly content: string; readonly status: string }>
+  /** `git status --porcelain` lines: files changed so far. */
+  readonly changes: readonly string[]
+}
+
+const remoteFor = async (auth: RailwayAuth, handle: Handle, signal: AbortSignal) => {
+  const sandbox = await Sandbox.connect(handle.sandboxID, connectOptions(auth))
+  return { sandbox, remote: new Remote(handle.url, handle.password, signal, sandbox) }
+}
+
+/** Reads what a running task's remote agent is doing right now. Read-only. */
+export async function inspectSandbox(auth: RailwayAuth, handle: Handle, signal: AbortSignal): Promise<Activity> {
+  const { sandbox, remote } = await remoteFor(auth, handle, signal)
+  const [active, messages, status] = await Promise.all([
+    remote.request<Record<string, unknown>>("GET", "/api/session/active"),
+    remote.request<RemoteMessage[]>("GET", `/api/session/${handle.sessionID}/message`).then(chronological),
+    sandbox.exec(sh(`cd ${REMOTE_DIR} && git -c core.quotepath=off status --porcelain | head -40`), { ephemeral: true, timeoutSec: 30, signal }),
+  ])
+  const parts = messages.filter((message) => message.type === "assistant").flatMap((message) => message.content ?? [])
+  const tools = parts.filter((part) => part.type === "tool")
+  const todo = tools.filter((part) => part.name === "todowrite").at(-1)?.state?.input as { todos?: Array<{ content: string; status: string }> } | undefined
+  return {
+    messages: messages.length,
+    busy: Object.hasOwn(active ?? {}, handle.sessionID),
+    said: parts
+      .filter((part) => part.type === "text" && part.text?.trim())
+      .slice(-3)
+      .map((part) => clip(part.text!.trim(), 600)),
+    tools: tools.slice(-8).map((part) => ({
+      name: part.name ?? "tool",
+      status: part.state?.status ?? "unknown",
+      input: describeInput(part.state?.input),
+      output: clip(
+        oneLine(
+          (part.state?.content ?? [])
+            .map((item) => item.text ?? "")
+            .join(" ")
+            .slice(-300),
+        ),
+        300,
+      ),
+    })),
+    ...(todo?.todos ? { todos: todo.todos.map((item) => ({ content: item.content, status: item.status })) } : {}),
+    changes: status.stdout.split("\n").filter(Boolean),
+  }
+}
+
+/** Sends a follow-up to the remote agent: "steer" joins the current turn, "queue" runs after it. */
+export async function messageSandbox(auth: RailwayAuth, handle: Handle, text: string, delivery: "steer" | "queue", signal: AbortSignal) {
+  const { remote } = await remoteFor(auth, handle, signal)
+  await remote.request("POST", `/api/session/${handle.sessionID}/prompt`, { text, delivery })
+}
+
+/**
+ * Mints a single-use, short-lived link that signs a browser into the remote OpenCode's web UI, the way
+ * `opencode pair` does, so the server password never appears in a URL.
+ */
+export async function watchLink(auth: RailwayAuth, handle: Handle, signal: AbortSignal) {
+  const { remote } = await remoteFor(auth, handle, signal)
+  const pairing = await remote.request<{ code: string; expires_in: number }>("POST", "/api/pair")
+  return { url: `${handle.url}/auth/connect/${pairing.code}`, expiresIn: pairing.expires_in, sessionID: handle.sessionID }
 }

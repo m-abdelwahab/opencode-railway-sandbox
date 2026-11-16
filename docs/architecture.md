@@ -35,6 +35,14 @@ railway_sandbox ──► registry: running ──► start (sandbox, upload, se
 - **Reloads.** On unload the plugin aborts its watchers with a `Detached` reason: the sandbox is kept, and a task that
   stored its handle is resumed by the next instance for the same directory (checked 2s after load and every 30s). A
   process-wide set prevents two instances from following one task, and only the resuming instance reports.
+- **Processes.** Plugin storage and sessions are in OpenCode's database, which every OpenCode process on the machine
+  shares (Desktop's service, a separate `opencode serve`, `--standalone` runs). The follower renews a 90-second lease
+  (`lease/<task>`) every 30 seconds; another process resumes a task only after its lease lapses, claiming it and
+  re-reading the lease to settle a simultaneous claim. A `delivered/<task>` marker makes the report idempotent.
+- **Live access.** `railway_sandbox_status` reads the remote session's messages over the same transport and runs
+  `git status` in the VM; `railway_sandbox_message` posts a prompt with `steer` or `queue` delivery and records the time
+  in `steer/<task>`, so the follower only treats the session as finished once it went idle after the last follow-up;
+  watch links come from the remote server's `POST /api/pair` (single use, 5 minutes).
 - **Transport.** Requests to the remote OpenCode go through the sandbox's public domain with a 30s timeout. On a
   network-level failure they are retried as `curl` inside the VM over Railway's exec channel. Polling tolerates 3 minutes
   without contact.

@@ -8,7 +8,7 @@ import * as FreeVM from "./free-vm.ts"
 import * as OAuth from "./oauth.ts"
 import { listVariables, projectTokenScope, resolveEnvironment, SetupError, type RailwayAuth } from "./railway-auth.ts"
 import { RailwaySandbox } from "./rpc.ts"
-import { destroySandbox, Detached, followSandbox, runSandbox, type Handle } from "./sandbox.ts"
+import { destroySandbox, Detached, followSandbox, inspectSandbox, messageSandbox, runSandbox, watchLink, type Activity, type Handle } from "./sandbox.ts"
 import { createRegistry, isLive, type SandboxRecord } from "./state.ts"
 import { AnonymousUnavailable, sleep, type ForwardedCredential, type ModelRef, type RunInput, type RunResult } from "./types.ts"
 import { pack } from "./workspace.ts"
@@ -65,6 +65,17 @@ const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
  */
 const following: Set<string> = ((globalThis as Record<string, unknown>).__railwaySandboxFollowing ??= new Set<string>()) as Set<string>
 const handleKey = (task: string) => `handle/${task}`
+/** When a follow-up was last sent to a task's remote agent. */
+const steerKey = (task: string) => `steer/${task}`
+/**
+ * Plugin storage and sessions live in OpenCode's database, which every OpenCode process on the machine shares (for
+ * example Desktop's service and a separate `opencode serve`). The process following a task holds a lease on it, so
+ * another process only resumes a task whose follower has gone away.
+ */
+const leaseKey = (task: string) => `lease/${task}`
+const deliveredKey = (task: string) => `delivered/${task}`
+const LEASE_MS = 90_000
+const PROCESS_ID: string = ((globalThis as Record<string, unknown>).__railwaySandboxProcess ??= crypto.randomUUID()) as string
 
 export default Plugin.define({
   id: "railway-sandbox",
@@ -167,9 +178,57 @@ export default Plugin.define({
       return { stopped: true, message: `Task ${task} stopped${record.sandbox ? ` and sandbox ${record.sandbox} destroyed` : ""}.` }
     }
 
+    const notBefore = (task: string) => async () => (await ctx.storage.get(steerKey(task))) as number | undefined
+
+    /** A running sandbox task with a live remote agent, or a SetupError saying why there is none. */
+    const live = async (task: string) => {
+      const record = await registry.get(task)
+      if (!record) throw new SetupError(`Unknown task ${task}.`)
+      const handle = (await ctx.storage.get(handleKey(task))) as Handle | undefined
+      if (record.backend !== "sandbox" || record.status !== "running" || !handle)
+        throw new SetupError(
+          record.backend === "free-vm"
+            ? `Task ${task} runs on an anonymous Railway VM, which has no live remote session to inspect or message.`
+            : `Task ${task} has no live remote agent (status: ${record.status}${record.previewURL ? `, preview at ${record.previewURL}` : ""}).`,
+        )
+      const auth = await account()
+      if (!auth) throw new SetupError(`No Railway account is connected. ${CONNECT_HINT}`)
+      return { record, handle, auth }
+    }
+
+    const minutes = (ms: number) => `${Math.max(0, Math.round(ms / 60_000))}m`
+    const describe = (record: SandboxRecord, activity?: Activity) => {
+      const now = Date.now()
+      return [
+        `${record.task} — ${record.description} [${record.status}] (${record.directory.split("/").filter(Boolean).at(-1)})`,
+        `  running for ${minutes(now - record.startedAt)}${record.expiresAt && isLive(record) ? `, ${minutes(record.expiresAt - now)} left before it shuts down` : ""}`,
+        ...(record.previewURL ? [`  preview: ${record.previewURL}`] : []),
+        ...(activity
+          ? [
+              `  remote agent: ${activity.busy ? "working" : "idle"}, ${activity.messages} messages`,
+              ...(activity.todos?.length
+                ? ["  todos:", ...activity.todos.map((todo) => `    [${todo.status === "completed" ? "x" : todo.status === "in_progress" ? "~" : " "}] ${todo.content}`)]
+                : []),
+              ...(activity.tools.length
+                ? ["  recent tool calls:", ...activity.tools.map((tool) => `    ${tool.name} (${tool.status}) ${tool.input}${tool.output ? `\n      → ${tool.output}` : ""}`)]
+                : []),
+              ...(activity.said.length ? ["  latest from the remote agent:", ...activity.said.map((text) => `    ${text.replaceAll("\n", "\n    ")}`)] : []),
+              `  files changed so far: ${activity.changes.length ? activity.changes.join(", ") : "none"}`,
+            ]
+          : record.detail
+            ? [`  ${record.detail}`]
+            : []),
+      ].join("\n")
+    }
+
     const rpc = await ctx.rpc.register(RailwaySandbox, {
       list: async () => ({ sandboxes: (await registry.list()) as never }),
       stop: async (input) => stopTask((input as { task: string }).task),
+      watch: async (input, context) => {
+        const { auth, handle } = await live((input as { task: string }).task)
+        const link = await watchLink(auth, handle, context.signal)
+        return { url: link.url, expiresIn: link.expiresIn }
+      },
     })
     emit = (task) => rpc.events.emit("updated", { task })
 
@@ -216,6 +275,7 @@ export default Plugin.define({
       if (destroy) await result.dispose()
       const live = !destroy && result.running
       await ctx.storage.remove(handleKey(task)).catch(() => {})
+      await ctx.storage.remove(steerKey(task)).catch(() => {})
       await registry.update(task, {
         backend: result.backend,
         sandbox: result.sandbox,
@@ -238,9 +298,18 @@ export default Plugin.define({
       resumable: () => boolean,
     ) => {
       following.add(record.task)
+      const renew = () => ctx.storage.set(leaseKey(record.task), { owner: PROCESS_ID, until: Date.now() + LEASE_MS }).catch(() => {})
+      void renew()
+      const lease = setInterval(() => void renew(), LEASE_MS / 3)
+      /** Delivers a task's report at most once, even if another process also finished following it. */
+      const once = async (description: string, text: string) => {
+        if (await ctx.storage.get(deliveredKey(record.task)).catch(() => undefined)) return
+        await ctx.storage.set(deliveredKey(record.task), Date.now())
+        await deliver(record.sessionID, description, text)
+      }
       void work()
         .then(
-          (output) => deliver(record.sessionID, `Railway sandbox finished: ${record.description}`, output),
+          (output) => once(`Railway sandbox finished: ${record.description}`, output),
           async (error) => {
             // A reload detaches. A task that stored its handle is resumed (and reported) by the next instance, which may
             // already have finished it, so this instance must stay silent. Anything else, such as an anonymous
@@ -248,16 +317,19 @@ export default Plugin.define({
             if (controller.signal.reason instanceof Detached && resumable()) return
             const message = error instanceof Error ? error.message : String(error)
             await registry.update(record.task, { status: controller.signal.aborted ? "stopped" : "failed", detail: message }).catch(() => {})
-            await deliver(
-              record.sessionID,
+            await once(
               `Railway sandbox failed: ${record.description}`,
               `<railway_sandbox task="${record.task}" outcome="failed">\n${message}\n</railway_sandbox>`,
             )
           },
         )
         .finally(() => {
+          clearInterval(lease)
           following.delete(record.task)
           running.delete(record.task)
+          // A detached task keeps its lease until it expires, which is when another process may take over; in this
+          // process the next instance resumes it right away because the lease is its own.
+          if (!(controller.signal.reason instanceof Detached)) void ctx.storage.remove(leaseKey(record.task)).catch(() => {})
         })
     }
 
@@ -268,11 +340,18 @@ export default Plugin.define({
         if (following.has(record.task) || running.has(record.task)) continue
         const handle = (await ctx.storage.get(handleKey(record.task))) as Handle | undefined
         if (!handle) continue
+        const held = (await ctx.storage.get(leaseKey(record.task))) as { owner: string; until: number } | undefined
+        if (held && held.owner !== PROCESS_ID && held.until > Date.now()) continue
+        // Claim, then confirm after a beat: if another process claimed at the same moment, the later write wins.
+        await ctx.storage.set(leaseKey(record.task), { owner: PROCESS_ID, until: Date.now() + LEASE_MS })
+        await sleep(750)
+        if (((await ctx.storage.get(leaseKey(record.task))) as { owner?: string } | undefined)?.owner !== PROCESS_ID) continue
+        if (following.has(record.task)) continue
         const auth = await account().catch(() => undefined)
         if (!auth) continue
         const controller = new AbortController()
         running.set(record.task, { controller })
-        await registry.update(record.task, { detail: "Resumed after a plugin reload" })
+        await registry.update(record.task, { detail: "Resumed (the previous follower reloaded or went away)" })
         watch(record, controller, async () =>
           complete(
             record.task,
@@ -282,6 +361,7 @@ export default Plugin.define({
               preview: Boolean(handle.previewDomain),
               previewMinutes,
               signal: controller.signal,
+              notBefore: notBefore(record.task),
               progress: (status) => void registry.update(record.task, { detail: status }).catch(() => {}),
             }),
             [],
@@ -302,6 +382,7 @@ export default Plugin.define({
           "To let the remote agent reach the Railway project's databases and services, pass `variables` with Railway references (find names with railway_sandbox_variables).",
           "File changes come back as a patch; apply it with railway_sandbox_apply. They are never applied automatically.",
           "Runs in the background by default: the call returns immediately and you receive a <railway_sandbox> message when it finishes. Do not poll.",
+          "While it runs, railway_sandbox_status shows what the remote agent is doing (only when the user asks or you need it to decide what to do next) and railway_sandbox_message sends it follow-up instructions.",
           "Without a connected Railway account it uses a free anonymous Railway sandbox; if that is unavailable it returns a Railway sign-in link to relay to the user.",
         ].join("\n"),
         input: {
@@ -376,6 +457,7 @@ export default Plugin.define({
             preview: input.preview === true,
             previewMinutes,
             signal: controller.signal,
+            notBefore: notBefore(task),
             progress: (status, detail) => {
               track(status, detail)
               progress(status, detail)
@@ -551,6 +633,83 @@ export default Plugin.define({
             "Pass references, not values: e.g. variables = {\"DATABASE_URL\": \"${{" + (listing.services[0]?.service ?? "Service") + "." + (listing.services[0]?.names[0] ?? "VARIABLE") + "}}\"}.",
           ]
           return { content: lines.join("\n") }
+        },
+      })
+
+      editor.add({
+        name: `${TOOL}_status`,
+        options: { codemode: false },
+        description: [
+          "Shows what railway_sandbox tasks are doing right now: the remote agent's todo list, recent tool calls with output, its latest messages, files changed so far, and time left.",
+          "Without a task, summarizes every active task. Read-only.",
+          "Use it when the user asks how a task is going, or when you need its progress to decide what to do next. Never call it in a loop or to wait for a task: you are notified with a <railway_sandbox> message when it finishes.",
+          "Set watch=true to also get a single-use link (valid 5 minutes) that opens the remote OpenCode session live in a browser; give it to the user.",
+        ].join("\n"),
+        input: {
+          type: "object",
+          properties: {
+            task: { type: "string", description: "Task ID from railway_sandbox. Omit to summarize all active tasks." },
+            watch: { type: "boolean", description: "Also return a single-use link to watch the remote session in a browser. Requires task." },
+          },
+          additionalProperties: false,
+        },
+        execute: async (raw, context) => {
+          const input = raw as { task?: string; watch?: boolean }
+          if (!input.task) {
+            const active = (await registry.list()).filter(isLive)
+            if (!active.length) return { content: "No Railway sandbox tasks are running." }
+            const lines = await Promise.all(
+              active.map(async (record) => {
+                const target = await live(record.task).catch(() => undefined)
+                const activity = target ? await inspectSandbox(target.auth, target.handle, context.signal).catch(() => undefined) : undefined
+                return describe(record, activity && { ...activity, said: activity.said.slice(-1), tools: activity.tools.slice(-3) })
+              }),
+            )
+            return { content: lines.join("\n\n") }
+          }
+          const record = await registry.get(input.task)
+          if (!record) throw new SetupError(`Unknown task ${input.task}.`)
+          const target = await live(input.task).catch((error) => {
+            if (input.watch) throw error
+            return undefined
+          })
+          const activity = target ? await inspectSandbox(target.auth, target.handle, context.signal) : undefined
+          const link = target && input.watch ? await watchLink(target.auth, target.handle, context.signal) : undefined
+          return {
+            content: [
+              describe(record, activity),
+              ...(link ? ["", `Watch live (single use, expires in ${Math.round(link.expiresIn / 60)} minutes): ${link.url}`] : []),
+            ].join("\n"),
+          }
+        },
+      })
+
+      editor.add({
+        name: `${TOOL}_message`,
+        options: { codemode: false },
+        description: [
+          "Sends a follow-up instruction to a running railway_sandbox task's remote agent, like continuing a subagent.",
+          'delivery "steer" (default) adds it to the current turn so the agent sees it at its next step; "queue" runs it after the current turn.',
+          "The task's report still arrives as a single <railway_sandbox> message once the remote agent has finished everything, including this follow-up.",
+        ].join("\n"),
+        input: {
+          type: "object",
+          properties: {
+            task: { type: "string", description: "Task ID from railway_sandbox" },
+            message: { type: "string", description: "The instruction for the remote agent. It cannot see this conversation, so be specific." },
+            delivery: { type: "string", enum: ["steer", "queue"], description: 'Defaults to "steer".' },
+          },
+          required: ["task", "message"],
+          additionalProperties: false,
+        },
+        execute: async (raw, context) => {
+          const input = raw as { task: string; message: string; delivery?: "steer" | "queue" }
+          const { auth, handle } = await live(input.task)
+          // Recorded before sending, so the follower cannot mistake a pause right after this message for the end.
+          await ctx.storage.set(steerKey(input.task), Date.now())
+          await messageSandbox(auth, handle, input.message, input.delivery ?? "steer", context.signal)
+          await registry.update(input.task, { detail: `Follow-up sent (${input.delivery ?? "steer"})` })
+          return { content: `Sent to ${input.task} (${input.delivery ?? "steer"}). Its report arrives when the remote agent finishes, including this follow-up.` }
         },
       })
 

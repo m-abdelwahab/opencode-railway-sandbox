@@ -54,6 +54,20 @@ export const RailwaySandbox = Rpc.define({
         additionalProperties: false,
       },
     },
+    watch: {
+      input: {
+        type: "object",
+        properties: { task: { type: "string" } },
+        required: ["task"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: { url: { type: "string" }, expiresIn: { type: "number" } },
+        required: ["url", "expiresIn"],
+        additionalProperties: false,
+      },
+    },
   },
   events: {
     updated: {
