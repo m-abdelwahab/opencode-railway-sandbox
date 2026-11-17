@@ -8,6 +8,17 @@ bun test        # anonymous-tier refusal parsing, workspace packing
 bunx tsc -p .   # typecheck
 ```
 
+## Subagent fan-out end to end (`scripts/e2e-subagents.ts`)
+
+A local OpenCode session on a weaker model (`openai/gpt-5.6-luna` by default) fixes three broken modules in parallel on
+three Railway sandboxes, checks in on them, gets asked "How are my sandboxes doing?" mid-run, applies every patch, and
+runs the tests. The script checks the plugin's task list, Railway's own sandbox list (mid-run), the session's tool calls
+and reports, and the fixture's final test run. Needs a running OpenCode with the plugin and Railway connected:
+
+```bash
+RAILWAY_API_TOKEN=... RAILWAY_ENVIRONMENT_ID=... bun scripts/e2e-subagents.ts [--model provider/model] [--server url]
+```
+
 ## Standalone sandbox run (no OpenCode)
 
 Exercises `src/sandbox.ts` directly against a Railway environment:
@@ -132,3 +143,17 @@ the machine's credentials.
 | 28 | Non-git folder from macOS: extraction no longer keeps the local uid, so git in the sandbox accepts the tree | ✅ (was failing with "dubious ownership") |
 | 29 | Desktop: a running sandbox registers as a temporary "Railway" server; Watch live opens the remote session as a native tab | ✅ verified by hand in OpenCode Desktop 2.3.0 against a sandbox running OpenCode 2.0.29 |
 | 30 | The `servers` RPC returns every running sandbox's address, password and session; each remote server answers `/api/info` and the session | ✅ |
+
+## Results of the fifth run (2026-11-17): weak-model fan-out (`scripts/e2e-subagents.ts`, `openai/gpt-5.6-luna`)
+
+All 12 checks pass: three `railway_sandbox` calls on three distinct sandboxes, all RUNNING in Railway's own list mid-run;
+live check-ins with remote progress, including a fresh one for the user's mid-run question; exactly one report per task;
+three clean applies; the fixture's tests pass locally.
+
+Findings fixed along the way:
+
+- **The weak model polled.** After each report it kept calling `railway_sandbox_status` (10 calls in 90s) instead of
+  ending its turn. Repeat checks within 30s with no new user message now get a one-line nudge instead of the full status,
+  and every status reply ends with a reminder that reports arrive on their own. Next run: 4 full replies, 1 nudge.
+- **Harness:** `opencode run` takes its directory from `$PWD`, not the process cwd; the script sets both, and aborts
+  (interrupting the session and stopping its tasks) if a task ever records a folder other than the fixture.

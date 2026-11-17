@@ -196,6 +196,9 @@ export default Plugin.define({
       return { record, handle, auth }
     }
 
+    const STATUS_COOLDOWN_MS = 30_000
+    const REMINDER = "The report for each task arrives on its own and wakes you; don't check again unless the user asks."
+    const lastChecks = new Map<string, number>()
     const minutes = (ms: number) => `${Math.max(0, Math.round(ms / 60_000))}m`
     const describe = (record: SandboxRecord, activity?: Activity) => {
       const now = Date.now()
@@ -690,6 +693,31 @@ export default Plugin.define({
         },
         execute: async (raw, context) => {
           const input = raw as { task?: string; watch?: boolean }
+          // Agents, weaker models especially, tend to poll despite the description. A repeat check soon after the last
+          // one, with no new user message in between, gets a short nudge instead of the full (token-heavy) status.
+          if (!input.watch) {
+            const key = `${context.sessionID}:${input.task ?? "*"}`
+            const last = lastChecks.get(key)
+            const now = Date.now()
+            const lastUser = await ctx.session
+              .context({ sessionID: context.sessionID })
+              .then((messages) =>
+                Math.max(0, ...messages.filter((message) => message.type === "user").map((message) => message.time.created)),
+              )
+              .catch(() => now)
+            if (last !== undefined && now - last < STATUS_COOLDOWN_MS && lastUser < last)
+              return {
+                content: [
+                  `Checked ${Math.round((now - last) / 1000)}s ago; nothing worth reporting since.`,
+                  "Do not check again: each task's <railway_sandbox> report arrives on its own and wakes you.",
+                  "End your turn now unless you have other work to do.",
+                ].join(" "),
+                metadata: { throttled: true },
+              }
+            lastChecks.set(key, now)
+            // Checking every task also counts as checking each one.
+            if (!input.task) for (const record of await registry.list()) lastChecks.set(`${context.sessionID}:${record.task}`, now)
+          }
           if (!input.task) {
             const active = (await registry.list()).filter(isLive)
             if (!active.length) return { content: "No Railway sandbox tasks are running." }
@@ -700,7 +728,7 @@ export default Plugin.define({
                 return describe(record, activity && { ...activity, said: activity.said.slice(-1), tools: activity.tools.slice(-3) })
               }),
             )
-            return { content: lines.join("\n\n") }
+            return { content: [...lines, REMINDER].join("\n\n") }
           }
           const record = await registry.get(input.task)
           if (!record) throw new SetupError(`Unknown task ${input.task}.`)
@@ -714,6 +742,7 @@ export default Plugin.define({
             content: [
               describe(record, activity),
               ...(link ? ["", `Watch live (single use, expires in ${Math.round(link.expiresIn / 60)} minutes): ${link.url}`] : []),
+              ...(target ? ["", REMINDER] : []),
             ].join("\n"),
           }
         },
