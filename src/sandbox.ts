@@ -279,8 +279,11 @@ export async function followSandbox(
       lastStatus = status
       // The session was created fresh for this prompt, so an outcome plus an idle time means this run finished.
       if (!Object.hasOwn(active ?? {}, session.id) && current.outcome !== undefined && current.time.idle !== undefined) {
-        const sent = await input.notBefore?.().catch(() => undefined)
-        if (sent === undefined || current.time.idle >= sent) break
+        // Follow-ups can come from railway_sandbox_message or from someone typing into the session in Desktop. The run
+        // is over only once the session went idle after the newest of them.
+        const lastUser = Math.max(0, ...messages.filter((message) => message.type === "user").map((message) => message.time?.created ?? 0))
+        const sent = (await input.notBefore?.().catch(() => undefined)) ?? 0
+        if (current.time.idle >= Math.max(lastUser, sent)) break
       }
     }
 

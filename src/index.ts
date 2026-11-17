@@ -224,6 +224,22 @@ export default Plugin.define({
     const rpc = await ctx.rpc.register(RailwaySandbox, {
       list: async () => ({ sandboxes: (await registry.list()) as never }),
       stop: async (input) => stopTask((input as { task: string }).task),
+      // Running sandboxes as servers OpenCode Desktop can connect to, so their sessions open as native tabs. Only
+      // clients of this (password-protected) local server can call it; they already hold full local access.
+      servers: async () => ({
+        servers: (
+          await Promise.all(
+            (await registry.list())
+              .filter((record) => record.backend === "sandbox" && record.status === "running")
+              .map(async (record) => {
+                const handle = (await ctx.storage.get(handleKey(record.task))) as Handle | undefined
+                return handle
+                  ? [{ task: record.task, description: record.description, url: handle.url, password: handle.password, sessionID: handle.sessionID }]
+                  : []
+              }),
+          )
+        ).flat(),
+      }),
       watch: async (input, context) => {
         const { auth, handle } = await live((input as { task: string }).task)
         const link = await watchLink(auth, handle, context.signal)
@@ -494,6 +510,8 @@ export default Plugin.define({
               async (handle) => {
                 await ctx.storage.set(handleKey(task), handle as never)
                 handleSaved = true
+                // Desktop lists running sandboxes as servers; tell it this one is now reachable.
+                await emit(task).catch(() => {})
               },
             )
           const finish = async (result: RunResult) => {

@@ -68,6 +68,31 @@ export const RailwaySandbox = Rpc.define({
         additionalProperties: false,
       },
     },
+    servers: {
+      input: { type: "object", additionalProperties: false },
+      output: {
+        type: "object",
+        properties: {
+          servers: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                task: { type: "string" },
+                description: { type: "string" },
+                url: { type: "string" },
+                password: { type: "string" },
+                sessionID: { type: "string" },
+              },
+              required: ["task", "description", "url", "password", "sessionID"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["servers"],
+        additionalProperties: false,
+      },
+    },
   },
   events: {
     updated: {

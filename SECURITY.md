@@ -36,6 +36,9 @@ to move the session to the project's folder instead.
   (HTTP Basic auth). It is stopped before a preview starts.
 - **Lifetimes are enforced inside the VM** (`timeout`), so a task or preview cannot outlive its cap even if your machine
   goes away. Railway's idle timeout then reclaims the sandbox.
+- **Desktop connects to running sandboxes directly.** To open remote sessions as native tabs, the plugin hands each running
+  sandbox's address and password to OpenCode Desktop through your local OpenCode server, which only you can reach
+  (it is password-protected and already has full access to your machine).
 - **Previews are public URLs** on sandbox tasks. Anonymous-tier previews answer only your IP until the box is claimed.
 
 ## Local side

@@ -130,3 +130,5 @@ the machine's credentials.
 | 26 | Unit: refuses `/`, the home folder, and ancestors of home; refuses >20,000 files outside git; counts only what git would upload in a repo | ✅ 4 tests |
 | 27 | With the Railway MCP installed and the plugin not named in the prompt, the agent finds and calls `railway_sandbox` directly | ✅ |
 | 28 | Non-git folder from macOS: extraction no longer keeps the local uid, so git in the sandbox accepts the tree | ✅ (was failing with "dubious ownership") |
+| 29 | Desktop: a running sandbox registers as a temporary "Railway" server; Watch live opens the remote session as a native tab | ✅ verified by hand in OpenCode Desktop 2.3.0 against a sandbox running OpenCode 2.0.29 |
+| 30 | The `servers` RPC returns every running sandbox's address, password and session; each remote server answers `/api/info` and the session | ✅ |

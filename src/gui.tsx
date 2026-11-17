@@ -1,6 +1,6 @@
 import { createSignal, For, onCleanup, Show } from "solid-js"
 import { Schema } from "effect"
-import { Command, MenuItem, Panel, Plugin, Store, Style, usePlugin, type PanelTab } from "@opencode/plugin/gui"
+import { Command, MenuItem, Panel, Plugin, Server, Store, Style, usePlugin, type PanelTab } from "@opencode/plugin/gui"
 import { RailwaySandbox } from "./rpc"
 import type { SandboxRecord } from "./state"
 
@@ -25,6 +25,7 @@ const definition = Plugin.define({
       stop: "Stop and destroy",
       watch: "Watch live",
       "watch.failed": "Could not open the live session",
+      "watch.pending": "The sandbox's session is still starting. Try again in a few seconds.",
       stopped: "Stopped",
       left: "{{time}} left",
       expired: "shut down",
@@ -78,6 +79,17 @@ const ago = (ms: number) => {
   return minutes < 1 ? "just now" : minutes < 60 ? `${minutes}m ago` : `${Math.round(minutes / 60)}h ago`
 }
 
+interface RemoteServer {
+  readonly task: string
+  readonly description: string
+  readonly url: string
+  readonly password: string
+  readonly sessionID: string
+}
+
+/** Running sandboxes, registered as servers in setup; the view asks for one to open its session. */
+let openServer: (task: string) => Promise<{ key: string; sessionID: string } | undefined> = async () => undefined
+
 function SandboxesView() {
   const ctx = usePlugin<typeof definition>()
   const ui = ctx.ui
@@ -119,11 +131,17 @@ function SandboxesView() {
     }
   }
 
+  // Opens the remote agent's session as a native Desktop tab, through the temporary server registered for the sandbox.
+  // Outside Desktop (or if that fails) fall back to a single-use link in the browser.
   const watch = async (task: string) => {
     setBusy(`watch:${task}`)
     try {
-      const result = (await rpc().watch({ task })) as { url: string }
-      ctx.system.openExternal(result.url)
+      const server = await openServer(task)
+      if (server) ctx.tabs.open({ server: server.key, id: server.sessionID }, { focus: true })
+      else {
+        const result = (await rpc().watch({ task })) as { url: string }
+        ctx.system.openExternal(result.url)
+      }
     } catch (error) {
       ctx.toast.show({ title: ctx.t("watch.failed"), description: error instanceof Error ? error.message : String(error), variant: "error" })
     } finally {
@@ -257,6 +275,49 @@ export default Plugin.define({
   ...definition,
   setup(ctx) {
     const key = `${ctx.id}:main`
+
+    // Each running sandbox becomes a temporary server in Desktop, so the remote agent's session opens in a native tab,
+    // like a local session. Entries disappear when their task stops running.
+    const [servers, setServers] = createSignal<RemoteServer[]>([])
+    const [loaded, setLoaded] = createSignal(false)
+    const refresh = async () => {
+      try {
+        const result = (await ctx.client.rpc(RailwaySandbox).servers({})) as { servers: RemoteServer[] }
+        setServers(result.servers)
+      } catch {
+        // The OpenCode server is restarting; keep the last list until the next refresh.
+      } finally {
+        setLoaded(true)
+      }
+      return servers()
+    }
+    void refresh()
+    const poll = setInterval(() => void refresh(), 15_000)
+    const unsubscribe = ctx.client.rpc(RailwaySandbox).events.on("updated", () => void refresh())
+    openServer = async (task) => {
+      const found = servers().find((item) => item.task === task) ?? (await refresh()).find((item) => item.task === task)
+      if (!found || !ctx.desktop) return undefined
+      return { key: `${ctx.id}:${task}`, sessionID: found.sessionID }
+    }
+    ctx.add(
+      Server,
+      (): Server => ({
+        ready: loaded(),
+        entries: servers().map((item) => ({
+          id: item.task,
+          name: item.description,
+          label: "Railway",
+          state: "ready",
+          http: { url: item.url, password: item.password },
+          reconnect: async () => {
+            const fresh = (await refresh()).find((entry) => entry.task === item.task)
+            if (!fresh) throw new Error("The sandbox is no longer running.")
+            return { url: fresh.url, password: fresh.password }
+          },
+        })),
+      }),
+    )
+
     const tab: PanelTab = {
       id: "main",
       get title() {
@@ -304,5 +365,11 @@ export default Plugin.define({
         },
       }),
     )
+
+    return () => {
+      clearInterval(poll)
+      unsubscribe()
+      openServer = async () => undefined
+    }
   },
 })

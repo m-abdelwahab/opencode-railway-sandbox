@@ -246,11 +246,20 @@ palette (**Show Railway Sandboxes**). It lists your tasks across projects, showi
 - status and the time left before the sandbox shuts itself down
 - preview URLs, with open and copy buttons
 - patch state (ready or applied) and the injected variable names
-- **Watch live** for running tasks: opens the remote OpenCode session in your browser through a fresh single-use link
+- **Watch live** for running tasks: opens the remote agent's session as a native Desktop tab, like a local session
+  (see below)
 - a **Stop and destroy** button for running sandboxes
 
 Tabs switch between **Active** (the default) and **All**, which adds finished, failed, and stopped tasks from the last
 24 hours, with a count on each. The choice is remembered, and the panel updates live from the plugin's RPC events.
+
+### Remote sessions as native tabs
+
+While a task runs, its sandbox appears in Desktop as a temporary server labelled **Railway**, and **Watch live** opens
+the remote agent's session in a normal tab: the live timeline, tool calls, and output. The server disappears when the
+task ends. The tab is fully interactive: anything you type goes to the remote agent, and the plugin waits until the
+session is idle after your latest message before it collects the patch and reports. Outside Desktop, Watch live falls
+back to a single-use browser link.
 
 The panel is a GUI part (`./gui-experimental`), which OpenCode Desktop loads only for plugins in your **global**
 `opencode.json(c)`. The web UI lists the plugin but does not run third-party GUI parts.
