@@ -87,8 +87,7 @@ const files: Record<string, string> = {
 }
 for (const [file, content] of Object.entries(files)) writeFileSync(path.join(directory, file), content)
 spawnSync("sh", ["-c", "git init -q && git add -A && git -c user.name=e2e -c user.email=e2e@example.com commit -qm fixture"], { cwd: directory })
-// An untracked, non-ignored secret: it must never reach a sandbox.
-writeFileSync(path.join(directory, ".env.local"), "STRIPE_SECRET_KEY=sk_test_e2e_do_not_upload\n")
+
 log(`fixture at ${directory}; model ${MODEL}`)
 
 // ---- 1. Fan out ----------------------------------------------------------------------------------------------------
@@ -171,14 +170,10 @@ if (railwayRunning)
 
 if (railwayNetworks)
   check(
-    liveSandboxes.every((id) => railwayNetworks!.get(id)?.isolation === "ISOLATED" && railwayNetworks!.get(id)?.domains === 0),
-    "sandboxes were isolated: no private network, no public URL",
+    liveSandboxes.every((id) => railwayNetworks!.get(id)?.isolation === "PRIVATE" && railwayNetworks!.get(id)?.domains === 1),
+    "sandboxes run with the default network: private, server published for Watch live",
     liveSandboxes.map((id) => `${railwayNetworks!.get(id)?.isolation}/${railwayNetworks!.get(id)?.domains} domains`).join(", "),
   )
-check(
-  reports.some((report) => /Not uploaded because they look like secrets: [^\n]*\.env\.local/.test(String(report.text))),
-  "the untracked .env.local was withheld and reported",
-)
 
 const statusOutputs = statuses.map((call) => JSON.stringify(call.state?.content ?? call.state?.output ?? ""))
 check(statuses.length >= 1, "the main agent checked in with railway_sandbox_status", `${statuses.length} call(s)`)

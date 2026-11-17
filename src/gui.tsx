@@ -282,7 +282,7 @@ function SandboxesView() {
                   <pre class="rs-activity">{activity() ?? ctx.t("activity.loading")}</pre>
                 </Show>
                 <div class="rs-buttons">
-                  <Show when={status(sandbox) === "running" && sandbox.network === "private"}>
+                  <Show when={status(sandbox) === "running" && sandbox.network !== "isolated"}>
                     <ui.Button variant="contrast" busy={busy() === `watch:${sandbox.task}`} onClick={() => void watch(sandbox.task)}>
                       {ctx.t("watch")}
                     </ui.Button>

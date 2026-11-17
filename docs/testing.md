@@ -167,3 +167,7 @@ Findings fixed along the way:
 | 33 | Railway rejects a public domain on an isolated sandbox ("Public domains require PRIVATE network isolation"), so isolated sandboxes have no URL at all | ✅ (probe) |
 | 34 | Unit: patches with `../`, `.git/` (any case), symlinks, or writes through a symlinked directory leaving the project are refused before git runs; ordinary patches still apply | ✅ 5 tests |
 | 35 | Unit: secret patterns withheld in git and non-git folders, templates kept, `uploadInclude`/`uploadExclude` honored | ✅ 2 tests |
+
+**0.4.1:** the network isolation and secret withholding defaults were reverted after hands-on use: the text Activity view
+was a poor substitute for native tabs. Both remain as options (`network: "isolated"`, `withholdSecrets: true`); patch
+validation stays on. See the README's Design considerations.

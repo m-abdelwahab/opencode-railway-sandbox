@@ -24,6 +24,8 @@ export interface PackedWorkspace {
 }
 
 export interface PackOptions {
+  /** Withhold files matching the built-in secret patterns. `exclude` patterns always apply. */
+  readonly withholdSecrets?: boolean
   /** Extra patterns to withhold (same syntax as the defaults). */
   readonly exclude?: readonly string[]
   /** Patterns to upload even though they match a default secret pattern, e.g. ".env.test". */
@@ -75,8 +77,9 @@ export function isWithheld(file: string, options: PackOptions = {}) {
       ? normalized.split("/").some((_, index, parts) => glob(pattern).test(parts.slice(index).join("/")))
       : glob(pattern).test(name)
   if ((options.include ?? []).some(matches)) return false
-  if (SAFE_TEMPLATES.includes(name)) return false
-  return [...SECRET_PATTERNS, ...(options.exclude ?? [])].some(matches)
+  if ((options.exclude ?? []).some(matches)) return true
+  if (!options.withholdSecrets || SAFE_TEMPLATES.includes(name)) return false
+  return SECRET_PATTERNS.some(matches)
 }
 
 /** Files outside node_modules/.git/.DS_Store, for directories that are not git checkouts. */

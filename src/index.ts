@@ -49,8 +49,14 @@ interface Options {
   readonly uploadExclude?: readonly string[]
   /** Patterns to upload even though they match a built-in secret pattern, e.g. ".env.test". */
   readonly uploadInclude?: readonly string[]
-  /** Make every sandbox task watchable as a native Desktop tab (joins the private network, publishes the server). */
-  readonly liveView?: boolean
+  /**
+   * "private" (default): sandboxes join the project's private network and publish their OpenCode server behind a
+   * per-task password, so every task can be watched as a native Desktop tab. "isolated": no private network and no
+   * public URL unless a task uses variables or a preview; the panel shows an Activity view instead of Watch live.
+   */
+  readonly network?: "private" | "isolated"
+  /** Withhold files that look like secrets (.env*, keys, credentials) from uploads even when not gitignored. */
+  readonly withholdSecrets?: boolean
 }
 
 const CONNECT_HINT =
@@ -450,7 +456,7 @@ export default Plugin.define({
             live: {
               type: "boolean",
               description:
-                "Only when the user wants to watch the remote session live in a Desktop tab. Joins the project's private network and publishes the remote server on a password-protected URL. Otherwise sandboxes are isolated: no private network, no public URL.",
+                'Only needed when the plugin is configured with network: "isolated" and the user wants to watch this task live in a Desktop tab.',
             },
             agent: { type: "string", description: 'Remote agent to use. Defaults to "build".' },
             model: { type: "string", description: 'Only if the user asks for a specific model: "providerID/modelID" or "providerID/modelID#variant".' },
@@ -480,7 +486,8 @@ export default Plugin.define({
           const needsAccount = Object.keys(variables).length > 0
           // Isolated unless the task needs the private network: variables (internal services), a preview (public URL),
           // or a live view (public URL for Desktop). Public domains require the private network on Railway.
-          const network: "isolated" | "private" = needsAccount || input.preview || input.live || options.liveView ? "private" : "isolated"
+          const network: "isolated" | "private" =
+            options.network !== "isolated" || needsAccount || input.preview || input.live ? "private" : "isolated"
 
           const requested = input.model || options.model
           let model: ModelRef | undefined = requested ? parseModel(requested) : parent.model
@@ -494,7 +501,11 @@ export default Plugin.define({
           }
           if (needsAccount) notes.push(`Environment variables set on the sandbox: ${Object.keys(variables).join(", ")}.`)
 
-          const archive = await pack(directory, { exclude: options.uploadExclude, include: options.uploadInclude })
+          const archive = await pack(directory, {
+            withholdSecrets: options.withholdSecrets === true,
+            exclude: options.uploadExclude,
+            include: options.uploadInclude,
+          })
           if (archive.withheld.length)
             notes.push(
               `Not uploaded because they look like secrets: ${archive.withheld.join(", ")}. Add patterns to the plugin's "uploadInclude" option to send them.`,
