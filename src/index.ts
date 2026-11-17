@@ -11,7 +11,7 @@ import { RailwaySandbox } from "./rpc.ts"
 import { destroySandbox, Detached, followSandbox, inspectSandbox, messageSandbox, runSandbox, watchLink, type Activity, type Handle } from "./sandbox.ts"
 import { createRegistry, isLive, type SandboxRecord } from "./state.ts"
 import { AnonymousUnavailable, sleep, type ForwardedCredential, type ModelRef, type RunInput, type RunResult } from "./types.ts"
-import { pack } from "./workspace.ts"
+import { checkDirectory, pack } from "./workspace.ts"
 
 export const INTEGRATION_ID = "railway-sandbox"
 /** Public (native) OAuth client for "Railway Sandbox". PKCE only; there is no secret to protect. */
@@ -371,6 +371,22 @@ export default Plugin.define({
       }
     }
 
+    // These are direct tools. Agents that work mostly through Code Mode (for example with Railway's MCP installed) can
+    // search only that catalog and conclude the tools are missing, so say where they are while they are available.
+    const hint = (event: { tools: Record<string, unknown>; system: Array<{ type: "text"; text: string }> }) => {
+      if (!event.tools[TOOL]) return
+      event.system.push({
+        type: "text",
+        text: [
+          "The Railway OpenCode plugin is installed. Its tools are direct tools, not part of the Code Mode catalog:",
+          "railway_sandbox (run a task, or build and preview the app, on a Railway sandbox using a copy of this session's folder),",
+          "railway_sandbox_status, railway_sandbox_message, railway_sandbox_apply, railway_sandbox_variables, railway_sandbox_stop.",
+          "Use them when the user asks to run something on a Railway sandbox or remotely, or for a preview URL. They are different from Railway cloud agents in the Railway MCP.",
+        ].join(" "),
+      })
+    }
+    await ctx.session.hook("context", hint as never)
+
     await ctx.tool.transform((editor) => {
       editor.add({
         name: TOOL,
@@ -416,6 +432,7 @@ export default Plugin.define({
           }
           const parent = await ctx.session.get({ sessionID: context.sessionID })
           const directory = parent.location.directory
+          await checkDirectory(directory, os.homedir())
 
           const variables = { ...options.variables, ...input.variables }
           const invalid = Object.keys(variables).filter((name) => !VARIABLE_NAME.test(name))

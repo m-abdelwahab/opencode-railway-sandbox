@@ -19,6 +19,12 @@ Running a `railway_sandbox` task sends data to Railway. Know what that is before
 | **Your prompt** | The remote OpenCode and its model provider | Same as any OpenCode session. |
 | **Anonymous tier** | `ssh railway.new` | A per-project SSH key generated in `~/.local/share/opencode-railway-sandbox/free-vm/`. Railway identifies the box by that key. |
 
+## Upload guard
+
+Before anything is packed, the plugin refuses the filesystem root, your home folder, any folder that contains your
+home folder, and folders with more than 20,000 files to upload; archives over 200 MB are refused too. The agent is told
+to move the session to the project's folder instead.
+
 ## How the remote side is protected
 
 - **Remote agents run without approval prompts.** The VM is disposable, so the remote OpenCode allows every tool

@@ -132,8 +132,9 @@ export async function runFreeVM(vm: FreeVM, input: RunInput, known: ReadonlyArra
     [
       "set -e",
       `rm -rf ${WORKSPACE} && mkdir -p ${WORKSPACE}`,
-      `tar -xzf - -C ${WORKSPACE} --warning=no-unknown-keyword`,
+      `tar -xzf - -C ${WORKSPACE} --no-same-owner --warning=no-unknown-keyword`,
       `cd ${WORKSPACE}`,
+      `git config --global --add safe.directory "$(cd ${WORKSPACE} && pwd)"`,
       "git init -q && git add -A",
       "git -c user.name=opencode -c user.email=opencode@localhost commit -q --allow-empty -m baseline",
       `echo ${MARKER}`,

@@ -159,10 +159,13 @@ export async function startSandbox(options: SandboxOptions, input: RunInput): Pr
         [
           "set -e",
           `mkdir -p ${REMOTE_DIR}`,
-          `tar -xzf /root/.workspace.tgz -C ${REMOTE_DIR} --warning=no-unknown-keyword`,
+          `tar -xzf /root/.workspace.tgz -C ${REMOTE_DIR} --no-same-owner --warning=no-unknown-keyword`,
           "rm -f /root/.workspace.tgz",
           `cd ${REMOTE_DIR}`,
           // A fresh baseline commit lets us hand back exactly what the remote agent changed.
+          // Archives from macOS carry the local uid; root must own the tree or git refuses it as "dubious ownership".
+          `chown -R root:root ${REMOTE_DIR}`,
+          `git config --global --add safe.directory ${REMOTE_DIR}`,
           "git init -q",
           "git add -A",
           "git -c user.name=opencode -c user.email=opencode@localhost commit -q --allow-empty -m baseline",

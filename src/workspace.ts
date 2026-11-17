@@ -26,6 +26,15 @@ export interface PackedWorkspace {
  * files, i.e. the working tree exactly as the local agent sees it, without `.git` or ignored build output.
  */
 export async function pack(directory: string): Promise<PackedWorkspace> {
+  const packed = await packArchive(directory)
+  if (packed.archive.byteLength > MAX_BYTES)
+    throw new UnsafeDirectory(
+      `The project packs to ${(packed.archive.byteLength / 1024 / 1024).toFixed(0)} MB, over the ${MAX_BYTES / 1024 / 1024} MB limit. Nothing was uploaded. Add large build output or data files to .gitignore, or move this session to a smaller project folder.`,
+    )
+  return packed
+}
+
+async function packArchive(directory: string): Promise<PackedWorkspace> {
   const git = (await run("git", ["rev-parse", "--is-inside-work-tree"], { cwd: directory }).catch(() => undefined))
     ?.stdout.toString()
     .trim() === "true"
@@ -56,4 +65,46 @@ export async function pack(directory: string): Promise<PackedWorkspace> {
   )
   if (tar.code !== 0) throw new Error(`tar failed: ${tar.stderr}`)
   return { archive: tar.stdout, files: -1, git }
+}
+
+/** Most files and bytes a task may upload. Real projects (sans node_modules and ignored output) stay far below. */
+export const MAX_FILES = 20_000
+export const MAX_BYTES = 200 * 1024 * 1024
+
+export class UnsafeDirectory extends Error {}
+
+/** Counts files outside node_modules/.git, giving up once past `limit`. */
+async function countFiles(directory: string, limit: number) {
+  const { readdir } = await import("node:fs/promises")
+  let count = 0
+  const stack = [directory]
+  while (stack.length && count <= limit) {
+    const entries = await readdir(stack.pop()!, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === ".git") continue
+      if (entry.isDirectory()) stack.push(path.join(entry.parentPath, entry.name))
+      else if (++count > limit) break
+    }
+  }
+  return count
+}
+
+/**
+ * Refuses directories that are clearly not a project, before anything is packed: the home folder, the filesystem root,
+ * any ancestor of the home folder, and trees with too many files to be one project. A session started in `~` would
+ * otherwise upload the user's whole home folder.
+ */
+export async function checkDirectory(directory: string, home: string) {
+  const resolved = path.resolve(directory)
+  const hint = "Move this session to the project's folder (or start OpenCode there) and retry."
+  if (resolved === path.parse(resolved).root) throw new UnsafeDirectory(`The session's folder is the filesystem root, so nothing was uploaded. ${hint}`)
+  if (resolved === path.resolve(home)) throw new UnsafeDirectory(`The session's folder is the home folder (${resolved}), so nothing was uploaded. ${hint}`)
+  if (path.resolve(home).startsWith(resolved + path.sep))
+    throw new UnsafeDirectory(`The session's folder (${resolved}) contains the home folder, so nothing was uploaded. ${hint}`)
+  const listed = await run("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: resolved }).catch(() => undefined)
+  const files = listed?.code === 0 ? listed.stdout.toString().split("\0").filter(Boolean).length : await countFiles(resolved, MAX_FILES)
+  if (files > MAX_FILES)
+    throw new UnsafeDirectory(
+      `The session's folder (${resolved}) has more than ${MAX_FILES.toLocaleString("en-US")} files to upload, which looks like more than one project. Nothing was uploaded. ${hint}`,
+    )
 }

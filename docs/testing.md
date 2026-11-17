@@ -121,3 +121,12 @@ the machine's credentials.
 
 - A report was delivered twice: a second OpenCode process (the machine's regular service, which shares the database)
   resumed a task another process was still following. Fixed with a cross-process lease and an idempotent delivery marker.
+
+## Results of the fourth run (2026-11-17): folder guard and discoverability
+
+| # | Scenario | Result |
+|---|---|---|
+| 25 | Session in `~`: `railway_sandbox` refuses before packing ("The session's folder is the home folder … nothing was uploaded"); the agent moves the session to a project folder and retries | ✅ |
+| 26 | Unit: refuses `/`, the home folder, and ancestors of home; refuses >20,000 files outside git; counts only what git would upload in a repo | ✅ 4 tests |
+| 27 | With the Railway MCP installed and the plugin not named in the prompt, the agent finds and calls `railway_sandbox` directly | ✅ |
+| 28 | Non-git folder from macOS: extraction no longer keeps the local uid, so git in the sandbox accepts the tree | ✅ (was failing with "dubious ownership") |
