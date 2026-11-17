@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import { Schema } from "effect"
 import { Command, MenuItem, Panel, Plugin, Server, Store, Style, usePlugin, type PanelTab } from "@opencode/plugin/gui"
 import { RailwaySandbox } from "./rpc"
@@ -26,6 +26,10 @@ const definition = Plugin.define({
       watch: "Watch live",
       "watch.failed": "Could not open the live session",
       "watch.pending": "The sandbox's session is still starting. Try again in a few seconds.",
+      activity: "Activity",
+      "activity.hide": "Hide activity",
+      "activity.loading": "Loading the remote agent's activity…",
+      isolated: "isolated",
       stopped: "Stopped",
       left: "{{time}} left",
       expired: "shut down",
@@ -47,6 +51,8 @@ const css = `
 .rs-tab:hover { opacity: 1; }
 .rs-tab[aria-selected="true"] { opacity: 1; background: rgba(127,127,127,0.22); font-weight: 600; }
 .rs-tab:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.rs-activity { margin: 0; padding: 8px; border-radius: 6px; background: rgba(127,127,127,0.1); font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; }
 .rs-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
 .rs-count { font-size: 11px; opacity: 0.7; font-variant-numeric: tabular-nums; }
 .rs-empty, .rs-muted { opacity: 0.65; }
@@ -149,6 +155,23 @@ function SandboxesView() {
     }
   }
 
+  // Inline live activity: the view for isolated sandboxes, which have no URL to open.
+  const [expanded, setExpanded] = createSignal<string>()
+  const [activity, setActivity] = createSignal<string>()
+  createEffect(() => {
+    const task = expanded()
+    setActivity(undefined)
+    if (!task) return
+    const fetch = () =>
+      void rpc()
+        .activity({ task })
+        .then((result) => setActivity((result as { text: string }).text))
+        .catch((error) => setActivity(String(error)))
+    fetch()
+    const timer = setInterval(fetch, 5_000)
+    onCleanup(() => clearInterval(timer))
+  })
+
   const status = (sandbox: SandboxRecord) =>
     LIVE.has(sandbox.status) && sandbox.expiresAt !== undefined && sandbox.expiresAt < now() ? "expired" : sandbox.status
   const active = () => sandboxes().filter((sandbox) => LIVE.has(status(sandbox)))
@@ -213,6 +236,9 @@ function SandboxesView() {
               <div class="rs-meta">
                 <span>{sandbox.directory.split("/").filter(Boolean).at(-1)}</span>
                 <span>{sandbox.backend === "free-vm" ? "anonymous" : sandbox.backend}</span>
+                <Show when={sandbox.network === "isolated"}>
+                  <span>{ctx.t("isolated")}</span>
+                </Show>
                 <span>started {ago(now() - sandbox.startedAt)}</span>
                 <Show when={LIVE.has(status(sandbox)) && sandbox.expiresAt}>
                   {(expires) => <span>{ctx.t("left", { time: remaining(expires() - now()) })}</span>}
@@ -252,10 +278,18 @@ function SandboxesView() {
                 <div class="rs-muted">{ctx.t("private")}</div>
               </Show>
               <Show when={LIVE.has(status(sandbox)) && sandbox.backend === "sandbox"}>
+                <Show when={expanded() === sandbox.task}>
+                  <pre class="rs-activity">{activity() ?? ctx.t("activity.loading")}</pre>
+                </Show>
                 <div class="rs-buttons">
-                  <Show when={status(sandbox) === "running"}>
+                  <Show when={status(sandbox) === "running" && sandbox.network === "private"}>
                     <ui.Button variant="contrast" busy={busy() === `watch:${sandbox.task}`} onClick={() => void watch(sandbox.task)}>
                       {ctx.t("watch")}
+                    </ui.Button>
+                  </Show>
+                  <Show when={status(sandbox) === "running"}>
+                    <ui.Button onClick={() => setExpanded(expanded() === sandbox.task ? undefined : sandbox.task)}>
+                      {expanded() === sandbox.task ? ctx.t("activity.hide") : ctx.t("activity")}
                     </ui.Button>
                   </Show>
                   <ui.Button busy={busy() === sandbox.task} onClick={() => void stop(sandbox.task)}>

@@ -22,6 +22,7 @@ const sandbox = {
     patchFile: { type: "string" },
     applied: { type: "boolean" },
     variables: { type: "array", items: { type: "string" } },
+    network: { type: "string", enum: ["isolated", "private"] },
   },
   required: ["task", "description", "backend", "status", "directory", "sessionID", "startedAt", "updatedAt"],
   additionalProperties: false,
@@ -90,6 +91,20 @@ export const RailwaySandbox = Rpc.define({
           },
         },
         required: ["servers"],
+        additionalProperties: false,
+      },
+    },
+    activity: {
+      input: {
+        type: "object",
+        properties: { task: { type: "string" } },
+        required: ["task"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
         additionalProperties: false,
       },
     },

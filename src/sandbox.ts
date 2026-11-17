@@ -21,6 +21,13 @@ export interface SandboxOptions {
   readonly maxMinutes: number
   /** Upgrade the sandbox's OpenCode to this version when it differs. */
   readonly opencodeVersion?: string
+  /**
+   * "isolated" (the default) keeps the sandbox off the project's private network and gives it no public URL; the
+   * plugin then reaches the remote OpenCode only through Railway's exec channel. "private" joins the private network
+   * (needed for variables that point at internal services, and for any public URL) and publishes the remote server so
+   * Desktop can open its session.
+   */
+  readonly network: "isolated" | "private"
 }
 
 const sh = (script: string) => `bash -lc ${quote(script)}`
@@ -34,7 +41,8 @@ class HttpError extends Error {}
  */
 export class Remote {
   constructor(
-    readonly base: string,
+    /** The remote server's public URL, or undefined for an isolated sandbox (exec channel only). */
+    readonly base: string | undefined,
     private readonly password: string,
     private readonly signal: AbortSignal,
     private readonly sandbox?: Sandbox,
@@ -62,6 +70,7 @@ export class Remote {
   }
 
   async request<T>(method: string, route: string, body?: unknown): Promise<T> {
+    if (!this.base) return this.viaExec(method, route, body)
     try {
       const response = await fetch(`${this.base}${route}`, {
         method,
@@ -111,7 +120,8 @@ export class Detached extends Error {}
 /** Everything needed to follow a started task again from another plugin instance. Contains the server password. */
 export interface Handle {
   readonly sandboxID: string
-  readonly url: string
+  /** Public URL of the remote server; absent for isolated sandboxes. */
+  readonly url?: string
   readonly password: string
   readonly sessionID: string
   readonly previewDomain?: string
@@ -140,17 +150,19 @@ export async function startSandbox(options: SandboxOptions, input: RunInput): Pr
     authType: options.auth.authType,
     ...(options.auth.environmentId ? { environmentId: options.auth.environmentId } : {}),
     idleTimeoutMinutes: options.idleTimeoutMinutes,
-    networkIsolation: "PRIVATE",
-    domains: [{ port: SERVER_PORT }, ...(input.preview ? [{ port: PREVIEW_PORT }] : [])],
+    // Public domains require the private network, so an isolated sandbox has none at all.
+    ...(options.network === "private"
+      ? { networkIsolation: "PRIVATE" as const, domains: [{ port: SERVER_PORT }, ...(input.preview ? [{ port: PREVIEW_PORT }] : [])] }
+      : { networkIsolation: "ISOLATED" as const }),
     // User variables first so they can never replace the server's password or the preview port.
     env: { ...input.variables, OPENCODE_PASSWORD: password, PORT: String(PREVIEW_PORT) },
   })
   const dispose = () => sandbox.destroy().then(() => {}, () => {})
   try {
     const domainFor = (port: number) => sandbox.domains?.find((entry) => entry.port === port)?.domain
-    const serverDomain = domainFor(SERVER_PORT)
-    if (!serverDomain) throw new Error(`Sandbox ${sandbox.id} has no public domain for port ${SERVER_PORT}`)
-    const url = `https://${serverDomain}`
+    const serverDomain = options.network === "private" ? domainFor(SERVER_PORT) : undefined
+    if (options.network === "private" && !serverDomain) throw new Error(`Sandbox ${sandbox.id} has no public domain for port ${SERVER_PORT}`)
+    const url = serverDomain ? `https://${serverDomain}` : undefined
 
     input.progress("uploading workspace", { sandboxID: sandbox.id, bytes: input.archive.byteLength })
     await sandbox.files.write("/root/.workspace.tgz", input.archive)
@@ -185,7 +197,7 @@ export async function startSandbox(options: SandboxOptions, input: RunInput): Pr
     // `timeout` makes the VM enforce the lifetime cap even if this machine goes away mid-run: once the server exits,
     // nothing keeps the sandbox busy and Railway's idle timeout destroys it.
     const server = sandbox.exec(
-      sh(`cd ${REMOTE_DIR} && exec timeout ${options.maxMinutes}m opencode serve --hostname 0.0.0.0 --port ${SERVER_PORT}`),
+      sh(`cd ${REMOTE_DIR} && exec timeout ${options.maxMinutes}m opencode serve --hostname ${url ? "0.0.0.0" : "127.0.0.1"} --port ${SERVER_PORT}`),
       { captureOutput: false },
     )
     await server.sessionName
@@ -442,6 +454,7 @@ export async function messageSandbox(auth: RailwayAuth, handle: Handle, text: st
  * `opencode pair` does, so the server password never appears in a URL.
  */
 export async function watchLink(auth: RailwayAuth, handle: Handle, signal: AbortSignal) {
+  if (!handle.url) throw new Error("This sandbox is isolated and has no public URL to watch from. Start the task with live: true to watch it live.")
   const { remote } = await remoteFor(auth, handle, signal)
   const pairing = await remote.request<{ code: string; expires_in: number }>("POST", "/api/pair")
   return { url: `${handle.url}/auth/connect/${pairing.code}`, expiresIn: pairing.expires_in, sessionID: handle.sessionID }

@@ -15,6 +15,7 @@ const result = await runSandbox(
     idleTimeoutMinutes: 10,
     maxMinutes: 30,
     opencodeVersion: process.env.MATCH_VERSION,
+    network: preview ? "private" : "isolated",
   },
   {
     archive: packed.archive,

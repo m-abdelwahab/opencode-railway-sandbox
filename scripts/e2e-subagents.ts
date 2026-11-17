@@ -87,6 +87,8 @@ const files: Record<string, string> = {
 }
 for (const [file, content] of Object.entries(files)) writeFileSync(path.join(directory, file), content)
 spawnSync("sh", ["-c", "git init -q && git add -A && git -c user.name=e2e -c user.email=e2e@example.com commit -qm fixture"], { cwd: directory })
+// An untracked, non-ignored secret: it must never reach a sandbox.
+writeFileSync(path.join(directory, ".env.local"), "STRIPE_SECRET_KEY=sk_test_e2e_do_not_upload\n")
 log(`fixture at ${directory}; model ${MODEL}`)
 
 // ---- 1. Fan out ----------------------------------------------------------------------------------------------------
@@ -122,9 +124,12 @@ const live = tasks(directory).filter((task) => task.status === "running")
 log(`${live.length} task(s) running; asking for a check-in`)
 // Railway's own view while they run: the plugin's records should match real, running sandboxes.
 let railwayRunning: Set<string> | undefined
+let railwayNetworks: Map<string, { isolation?: string; domains: number }> | undefined
 if (process.env.RAILWAY_API_TOKEN && process.env.RAILWAY_ENVIRONMENT_ID) {
   const { Sandbox } = await import("railway")
-  railwayRunning = new Set((await Sandbox.list()).filter((sandbox) => sandbox.status === "RUNNING").map((sandbox) => sandbox.id))
+  const listed = await Sandbox.list()
+  railwayRunning = new Set(listed.filter((sandbox) => sandbox.status === "RUNNING").map((sandbox) => sandbox.id))
+  railwayNetworks = new Map(listed.map((sandbox) => [sandbox.id, { isolation: sandbox.networkIsolation, domains: sandbox.domains?.length ?? 0 }]))
   log(`Railway reports ${railwayRunning.size} running sandbox(es)`)
 }
 const liveSandboxes = tasks(directory).filter((task) => task.status === "running" && task.sandbox).map((task) => task.sandbox as string)
@@ -163,6 +168,17 @@ if (railwayRunning)
     "mid-run, Railway itself reported every task's sandbox as RUNNING",
     `${liveSandboxes.filter((id) => railwayRunning!.has(id)).length}/${liveSandboxes.length}`,
   )
+
+if (railwayNetworks)
+  check(
+    liveSandboxes.every((id) => railwayNetworks!.get(id)?.isolation === "ISOLATED" && railwayNetworks!.get(id)?.domains === 0),
+    "sandboxes were isolated: no private network, no public URL",
+    liveSandboxes.map((id) => `${railwayNetworks!.get(id)?.isolation}/${railwayNetworks!.get(id)?.domains} domains`).join(", "),
+  )
+check(
+  reports.some((report) => /Not uploaded because they look like secrets: [^\n]*\.env\.local/.test(String(report.text))),
+  "the untracked .env.local was withheld and reported",
+)
 
 const statusOutputs = statuses.map((call) => JSON.stringify(call.state?.content ?? call.state?.output ?? ""))
 check(statuses.length >= 1, "the main agent checked in with railway_sandbox_status", `${statuses.length} call(s)`)

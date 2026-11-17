@@ -157,3 +157,13 @@ Findings fixed along the way:
   and every status reply ends with a reminder that reports arrive on their own. Next run: 4 full replies, 1 nudge.
 - **Harness:** `opencode run` takes its directory from `$PWD`, not the process cwd; the script sets both, and aborts
   (interrupting the session and stopping its tasks) if a task ever records a folder other than the fixture.
+
+## Results of the sixth run (2026-11-17): secure by default
+
+| # | Scenario | Result |
+|---|---|---|
+| 31 | Weak-model fan-out (`scripts/e2e-subagents.ts`, 14 checks): every sandbox `ISOLATED` with no domains per Railway; status, messages, and reports over the exec channel; untracked `.env.local` withheld and reported | ✅ all 14 |
+| 32 | `live: true` task: `PRIVATE` with the server published on 4096, offered to Desktop as a server; a default task alongside it stays `ISOLATED`, is not offered, and its panel Activity shows live progress | ✅ |
+| 33 | Railway rejects a public domain on an isolated sandbox ("Public domains require PRIVATE network isolation"), so isolated sandboxes have no URL at all | ✅ (probe) |
+| 34 | Unit: patches with `../`, `.git/` (any case), symlinks, or writes through a symlinked directory leaving the project are refused before git runs; ordinary patches still apply | ✅ 5 tests |
+| 35 | Unit: secret patterns withheld in git and non-git folders, templates kept, `uploadInclude`/`uploadExclude` honored | ✅ 2 tests |

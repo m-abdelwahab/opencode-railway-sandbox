@@ -24,6 +24,10 @@ const git = (cwd: string, args: string[], stdin?: string) =>
 
 interface FilePatch {
   readonly file: string
+  /** Every path the entry touches: the target, plus the source of a rename or copy. */
+  readonly paths: readonly string[]
+  /** Whether the entry creates or changes a symbolic link (mode 120000). */
+  readonly symlink: boolean
   /** Blob the remote started from; undefined for files the patch creates. */
   readonly preimage?: string
   readonly created: boolean
@@ -42,8 +46,45 @@ export async function parsePatch(patchFile: string): Promise<FilePatch[]> {
       const file = target ?? header.match(/ b\/(.+)$/)?.[1] ?? header
       const preimage = section.match(/^index ([0-9a-f]+)\.\./m)?.[1]
       const created = /^new file mode/m.test(section)
-      return { file, preimage: created || !preimage || /^0+$/.test(preimage) ? undefined : preimage, created, deleted: /^deleted file mode/m.test(section) }
+      const source = section.match(/^(?:rename|copy) from (.+)$/m)?.[1] ?? section.match(/^--- a\/(.+)$/m)?.[1]
+      const headerPaths = header.match(/^a\/(.+) b\/(.+)$/)?.slice(1) ?? []
+      return {
+        file,
+        paths: [...new Set([file, ...(source ? [source] : []), ...headerPaths])],
+        symlink: /^(?:new file mode|new mode|old mode|deleted file mode|index [0-9a-f]+\.\.[0-9a-f]+) 120000/m.test(section),
+        preimage: created || !preimage || /^0+$/.test(preimage) ? undefined : preimage,
+        created,
+        deleted: /^deleted file mode/m.test(section),
+      }
     })
+}
+
+export class UnsafePatch extends Error {}
+
+/**
+ * Rejects a patch that could write outside the project: absolute paths, `..` segments, anything under `.git/`,
+ * symbolic links, and paths whose existing parent directories resolve (through a symlink) outside the project.
+ * The patch comes from a remote agent that may be compromised, so this is checked before git ever sees it.
+ */
+export async function validatePatch(directory: string, entries: readonly FilePatch[]) {
+  const { realpath } = await import("node:fs/promises")
+  const root = await realpath(directory)
+  for (const entry of entries) {
+    if (entry.symlink) throw new UnsafePatch(`The patch creates or changes a symbolic link (${entry.file}); refusing to apply it.`)
+    for (const file of entry.paths) {
+      const segments = file.split(/[\\/]/)
+      if (path.isAbsolute(file) || /^[a-zA-Z]:/.test(file)) throw new UnsafePatch(`The patch uses an absolute path (${file}); refusing to apply it.`)
+      if (segments.includes("..")) throw new UnsafePatch(`The patch reaches outside the project (${file}); refusing to apply it.`)
+      if (segments.some((segment) => segment.toLowerCase() === ".git"))
+        throw new UnsafePatch(`The patch modifies git internals (${file}); refusing to apply it.`)
+      // The deepest existing ancestor must still be inside the project once symlinks are resolved.
+      let parent = path.dirname(path.join(root, file))
+      while (!existsSync(parent)) parent = path.dirname(parent)
+      const resolved = await realpath(parent)
+      if (resolved !== root && !resolved.startsWith(root + path.sep))
+        throw new UnsafePatch(`The patch writes through a symbolic link that leaves the project (${file}); refusing to apply it.`)
+    }
+  }
 }
 
 /** Files a patch touches, relative to the directory it applies in. */
@@ -102,6 +143,7 @@ async function mergeFile(directory: string, patchFile: string, entry: FilePatch,
 
 export async function applyPatch(directory: string, patchFile: string, options: { check?: boolean } = {}): Promise<ApplyResult> {
   const entries = await parsePatch(patchFile)
+  await validatePatch(directory, entries)
   const files = [...new Set(entries.map((entry) => entry.file))]
   const clean = await git(directory, ["apply", "--check", patchFile])
   if (options.check)

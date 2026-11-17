@@ -45,6 +45,12 @@ interface Options {
   readonly keepSandbox?: boolean
   /** Upgrade the sandbox's OpenCode to the local version before starting. */
   readonly matchVersion?: boolean
+  /** Extra file patterns never to upload, on top of the built-in secret patterns. */
+  readonly uploadExclude?: readonly string[]
+  /** Patterns to upload even though they match a built-in secret pattern, e.g. ".env.test". */
+  readonly uploadInclude?: readonly string[]
+  /** Make every sandbox task watchable as a native Desktop tab (joins the private network, publishes the server). */
+  readonly liveView?: boolean
 }
 
 const CONNECT_HINT =
@@ -236,13 +242,22 @@ export default Plugin.define({
               .filter((record) => record.backend === "sandbox" && record.status === "running")
               .map(async (record) => {
                 const handle = (await ctx.storage.get(handleKey(record.task))) as Handle | undefined
-                return handle
+                return handle?.url
                   ? [{ task: record.task, description: record.description, url: handle.url, password: handle.password, sessionID: handle.sessionID }]
                   : []
               }),
           )
         ).flat(),
       }),
+      // Live progress for the panel, which works for isolated sandboxes too (no public URL needed).
+      activity: async (input, context) => {
+        const task = (input as { task: string }).task
+        const record = await registry.get(task)
+        if (!record) return { text: `Unknown task ${task}.` }
+        const target = await live(task).catch(() => undefined)
+        const activity = target ? await inspectSandbox(target.auth, target.handle, context.signal).catch(() => undefined) : undefined
+        return { text: describe(record, activity) }
+      },
       watch: async (input, context) => {
         const { auth, handle } = await live((input as { task: string }).task)
         const link = await watchLink(auth, handle, context.signal)
@@ -432,6 +447,11 @@ export default Plugin.define({
               description:
                 'Environment variables for the remote sandbox, as NAME → value. Use Railway references instead of secret values, e.g. {"DATABASE_URL": "${{Postgres.DATABASE_URL}}"} or {"API_KEY": "${{shared.API_KEY}}"}; Railway resolves them inside the VM. Requires a Railway account; the sandbox joins the project\'s private network.',
             },
+            live: {
+              type: "boolean",
+              description:
+                "Only when the user wants to watch the remote session live in a Desktop tab. Joins the project's private network and publishes the remote server on a password-protected URL. Otherwise sandboxes are isolated: no private network, no public URL.",
+            },
             agent: { type: "string", description: 'Remote agent to use. Defaults to "build".' },
             model: { type: "string", description: 'Only if the user asks for a specific model: "providerID/modelID" or "providerID/modelID#variant".' },
             wait: { type: "boolean", description: "Block until the task finishes instead of running in the background. Defaults to false." },
@@ -445,6 +465,7 @@ export default Plugin.define({
             prompt: string
             preview?: boolean
             variables?: Record<string, string>
+            live?: boolean
             agent?: string
             model?: string
             wait?: boolean
@@ -457,6 +478,9 @@ export default Plugin.define({
           const invalid = Object.keys(variables).filter((name) => !VARIABLE_NAME.test(name))
           if (invalid.length) throw new Error(`Invalid environment variable names: ${invalid.join(", ")}.`)
           const needsAccount = Object.keys(variables).length > 0
+          // Isolated unless the task needs the private network: variables (internal services), a preview (public URL),
+          // or a live view (public URL for Desktop). Public domains require the private network on Railway.
+          const network: "isolated" | "private" = needsAccount || input.preview || input.live || options.liveView ? "private" : "isolated"
 
           const requested = input.model || options.model
           let model: ModelRef | undefined = requested ? parseModel(requested) : parent.model
@@ -470,7 +494,11 @@ export default Plugin.define({
           }
           if (needsAccount) notes.push(`Environment variables set on the sandbox: ${Object.keys(variables).join(", ")}.`)
 
-          const archive = await pack(directory)
+          const archive = await pack(directory, { exclude: options.uploadExclude, include: options.uploadInclude })
+          if (archive.withheld.length)
+            notes.push(
+              `Not uploaded because they look like secrets: ${archive.withheld.join(", ")}. Add patterns to the plugin's "uploadInclude" option to send them.`,
+            )
           const task = `rs_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
           const controller = new AbortController()
           const entry: { controller: AbortController; result?: RunResult } = { controller }
@@ -484,7 +512,9 @@ export default Plugin.define({
               .catch(() => {})
           const runInput = (progress: RunInput["progress"]): RunInput => ({
             archive: archive.archive,
-            prompt: input.prompt,
+            prompt: archive.withheld.length
+              ? `${input.prompt}\n\n(These files exist in the user's project but were withheld because they may contain secrets: ${archive.withheld.join(", ")}. Do not recreate them; if the task needs their values, say so in your report.)`
+              : input.prompt,
             title: input.description,
             agent: input.agent || options.agent || "build",
             model,
@@ -508,6 +538,7 @@ export default Plugin.define({
                 idleTimeoutMinutes: options.idleTimeoutMinutes ?? 10,
                 maxMinutes,
                 opencodeVersion: options.matchVersion ? ctx.app.version : undefined,
+                network,
               },
               runInput(progress),
               async (handle) => {
@@ -539,6 +570,7 @@ export default Plugin.define({
               updatedAt: startedAt,
               ...(backend === "sandbox" ? { expiresAt: startedAt + maxMinutes * 60_000 } : {}),
               ...(needsAccount ? { variables: Object.keys(variables) } : {}),
+              ...(backend === "sandbox" ? { network } : {}),
             })
           const background = (label: string, work: () => Promise<RunResult>) => {
             watch(
@@ -549,7 +581,7 @@ export default Plugin.define({
             )
             return label
           }
-          const summary = `${archive.git ? `${archive.files} files` : "project directory"}, ${(archive.archive.byteLength / 1024).toFixed(0)} KiB; model ${model ? `${model.providerID}/${model.id}` : "remote default"}${input.preview ? "; preview requested" : ""}${needsAccount ? `; variables ${Object.keys(variables).join(", ")}` : ""}`
+          const summary = `${network === "isolated" ? "isolated network" : "private network"}; ${archive.git ? `${archive.files} files` : "project directory"}, ${(archive.archive.byteLength / 1024).toFixed(0)} KiB; model ${model ? `${model.providerID}/${model.id}` : "remote default"}${input.preview ? "; preview requested" : ""}${needsAccount ? `; variables ${Object.keys(variables).join(", ")}` : ""}`
 
           // 1. A connected Railway account runs on Railway Sandboxes.
           const auth = await account().catch((error) => {
@@ -641,7 +673,7 @@ export default Plugin.define({
                 }
                 const connected = await account()
                 if (!connected) throw new Error(`Railway sign-in finished but no account is connected. ${CONNECT_HINT}`)
-                await registry.update(task, { backend: "sandbox", status: "running", detail: "Signed in; starting", expiresAt: Date.now() + maxMinutes * 60_000 })
+                await registry.update(task, { backend: "sandbox", network, status: "running", detail: "Signed in; starting", expiresAt: Date.now() + maxMinutes * 60_000 })
                 return viaSandbox(connected)(() => {})
               },
             ),
@@ -737,11 +769,16 @@ export default Plugin.define({
             return undefined
           })
           const activity = target ? await inspectSandbox(target.auth, target.handle, context.signal) : undefined
-          const link = target && input.watch ? await watchLink(target.auth, target.handle, context.signal) : undefined
+          const link =
+            target && input.watch && target.handle.url ? await watchLink(target.auth, target.handle, context.signal) : undefined
+          const unwatchable = target && input.watch && !target.handle.url
           return {
             content: [
               describe(record, activity),
               ...(link ? ["", `Watch live (single use, expires in ${Math.round(link.expiresIn / 60)} minutes): ${link.url}`] : []),
+              ...(unwatchable
+                ? ["", "This sandbox is isolated (no public URL), so it cannot be watched in a browser or Desktop tab; the activity above is the live view. Start future tasks with live: true to watch them."]
+                : []),
               ...(target ? ["", REMINDER] : []),
             ].join("\n"),
           }

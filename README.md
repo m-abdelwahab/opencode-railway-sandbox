@@ -162,6 +162,7 @@ If nothing is connected and the anonymous tier is unavailable, the agent will te
 | `prompt` | Self-contained instructions; the remote agent cannot see your conversation |
 | `preview` | Build the app and serve it on a preview URL |
 | `variables` | Environment variables for the sandbox, as Railway references (see below) |
+| `live` | Make the remote session watchable as a native Desktop tab (joins the private network; see [Network isolation](#network-isolation)) |
 | `agent` | Remote agent (default `build`) |
 | `model` | `provider/model#variant`, only when you ask for a specific model |
 | `wait` | Block until finished instead of running in the background |
@@ -221,6 +222,23 @@ may not edit (such as Plan) cannot apply. `check: true` only reports whether the
 
 Stops a task and destroys its sandbox (for example, to take a preview down early). Takes the task ID from the report.
 
+## Network isolation
+
+Sandboxes are **isolated by default**: no access to the project's private network, and no public URL. The remote
+OpenCode listens only inside the VM, and the plugin reaches it through Railway's exec channel. A remote agent (or a
+prompt injection in your repo or a web page it reads) therefore cannot reach your databases or internal services.
+
+A task joins the private network only when it needs to:
+
+| Task uses | Why |
+|---|---|
+| `variables` | References such as `${{Postgres.DATABASE_URL}}` usually point at internal hosts |
+| `preview` | Public URLs require the private network on Railway |
+| `live` (or the `liveView` option) | Desktop opens the remote session over the server's password-protected URL |
+
+Isolated sandboxes still have outbound internet access (package installs work). The panel marks them `isolated`; their
+**Activity** button shows the remote agent's live progress inside the panel instead of opening a tab.
+
 ## Railway variables and private services
 
 With a Railway account, every sandbox joins the project environment's private network. Pass `variables` with
@@ -246,8 +264,8 @@ palette (**Show Railway Sandboxes**). It lists your tasks across projects, showi
 - status and the time left before the sandbox shuts itself down
 - preview URLs, with open and copy buttons
 - patch state (ready or applied) and the injected variable names
-- **Watch live** for running tasks: opens the remote agent's session as a native Desktop tab, like a local session
-  (see below)
+- **Activity** for running tasks: the remote agent's todos, recent tool calls, and changed files, refreshed live
+- **Watch live** for tasks started with `live`: opens the remote agent's session as a native Desktop tab (see below)
 - a **Stop and destroy** button for running sandboxes
 
 Tabs switch between **Active** (the default) and **All**, which adds finished, failed, and stopped tasks from the last
@@ -255,7 +273,8 @@ Tabs switch between **Active** (the default) and **All**, which adds finished, f
 
 ### Remote sessions as native tabs
 
-While a task runs, its sandbox appears in Desktop as a temporary server labelled **Railway**, and **Watch live** opens
+For tasks started with `live: true` (or with the `liveView` option), while the task runs its sandbox appears in
+Desktop as a temporary server labelled **Railway**, and **Watch live** opens
 the remote agent's session in a normal tab: the live timeline, tool calls, and output. The server disappears when the
 task ends. The tab is fully interactive: anything you type goes to the remote agent, and the plugin waits until the
 session is idle after your latest message before it collects the patch and reports. Outside Desktop, Watch live falls
@@ -275,6 +294,9 @@ The panel is a GUI part (`./gui-experimental`), which OpenCode Desktop loads onl
 | `agent` | `build` | Default remote agent |
 | `anonymous` | `true` | Try a free `railway.new` sandbox when no account is connected |
 | `variables` | — | Variables for every task, e.g. `{ "DATABASE_URL": "${{Postgres.DATABASE_URL}}" }` |
+| `liveView` | `false` | Make every task watchable as a Desktop tab (every sandbox then joins the private network) |
+| `uploadExclude` | — | Extra file patterns never to upload, e.g. `["*.sqlite", "secrets/*"]` |
+| `uploadInclude` | — | Patterns to upload despite the built-in secret patterns, e.g. `[".env.test"]` |
 | `previewMinutes` | `60` | How long a preview stays up before the VM shuts itself down |
 | `maxMinutes` | `120` | Hard cap on a sandbox task, enforced inside the VM |
 | `idleTimeoutMinutes` | `10` | How long a finished sandbox lingers before Railway reclaims it (running work keeps it alive regardless) |

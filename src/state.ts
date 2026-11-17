@@ -20,6 +20,8 @@ export interface SandboxRecord {
   readonly shareable?: boolean
   readonly patchFile?: string
   readonly applied?: boolean
+  /** "isolated" sandboxes have no private network access and no public URL; "private" ones can be watched live. */
+  readonly network?: "isolated" | "private"
   /** Names of the environment variables injected into the sandbox. */
   readonly variables?: readonly string[]
 }
